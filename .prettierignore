@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+.output
+.wxt
+dist
+node_modules
+logs
+.Codex
+AGENTS.md
+public/samples/*.pdf
+public/pdfjs/
