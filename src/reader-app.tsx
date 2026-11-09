@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Brain,
   Check,
   ChevronRight,
   ExternalLink,
@@ -271,9 +272,9 @@ export function ReaderApp({
           }}
         >
           <span className="brand-mark">
-            <BookOpen size={19} />
+            <Brain size={19} />
           </span>
-          margin<span> / </span>
+          brain vat<span> / </span>
         </a>
         <div className="workspace-label">
           <span className="avatar">E</span>My reading space

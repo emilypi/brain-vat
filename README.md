@@ -1,7 +1,7 @@
-# Paper Reader
+# Brain Vat
 
 A local prototype for reading research papers with persistent highlights and a
-source-aware side panel. The interface uses the temporary name **margin**.
+source-aware side panel. The local repository is named `brain-vat`.
 
 ## Try it
 
@@ -30,7 +30,7 @@ pnpm build:extension
 
 1. Open `chrome://extensions` in Chrome and enable **Developer mode**.
 2. Choose **Load unpacked** and select this project's `.output/chrome-mv3` folder.
-3. Pin **Paper Reader**. On an arXiv or PDF page, click its toolbar icon.
+3. Pin **Brain Vat**. On an arXiv or PDF page, click its toolbar icon.
 4. Confirm the paper URL in the reader. Choose **Chrome panel** to use the native
    side panel instead of the companion embedded in the reader.
 
