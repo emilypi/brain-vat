@@ -111,6 +111,19 @@ test('native panel opens and rejects stale navigation', async () => {
         }, windowId),
       )
       .toBe(stored.snapshot.sessionId);
+    await reader.getByTestId('pdf-upload').setInputFiles({
+      name: 'broken.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.7\nnot a valid PDF structure\n'),
+    });
+    await expect(reader.getByRole('alert')).toContainText('Invalid PDF');
+    await expect
+      .poll(async () =>
+        panel.evaluate(async (id) => {
+          return chrome.runtime.sendMessage({ type: 'read-active', windowId: id });
+        }, windowId),
+      )
+      .toBeNull();
     await reader.goto('about:blank');
     await expect
       .poll(async () =>

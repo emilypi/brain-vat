@@ -85,7 +85,8 @@ Unit tests cover coordinate transforms, unsafe URL forms, document identity, sou
 lookup, and reader-session validation. Browser tests use the actual example PDF for
 selection, persistence, zoom, rotation, regions, source jumps and local uploads.
 The extension test opens a real native panel in packaged Chromium, rejects stale
-navigation, accepts valid navigation, and clears context when the reader navigates away.
+or inactive-tab navigation, accepts valid navigation, and clears context when the
+reader navigates away or a replacement PDF fails to parse.
 
 The minimatch override pins the patched version for development-only dependency
 paths; remove it when the upstream packages adopt the fix.

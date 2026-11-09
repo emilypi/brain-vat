@@ -14,6 +14,7 @@ export const snapshotSchema = z.object({
 export type ReaderSnapshot = z.infer<typeof snapshotSchema>;
 
 export const bridgeMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('clear'), sessionId: z.string().uuid() }),
   z.object({ type: z.literal('publish'), snapshot: snapshotSchema }),
   z.object({
     type: z.literal('read-active'),
@@ -30,6 +31,7 @@ export const bridgeMessageSchema = z.discriminatedUnion('type', [
 
 export interface ReaderEnvironment {
   nativePanel: boolean;
+  clear: (sessionId: string) => Promise<void>;
   requestOrigin: (url: string) => Promise<void>;
   publish: (snapshot: ReaderSnapshot) => Promise<void>;
   openPanel: () => Promise<void>;
@@ -40,6 +42,7 @@ export interface ReaderEnvironment {
 
 export const WEB_ENVIRONMENT: ReaderEnvironment = {
   nativePanel: false,
+  clear: async () => undefined,
   requestOrigin: async () => undefined,
   publish: async () => undefined,
   openPanel: async () => undefined,

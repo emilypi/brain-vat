@@ -6,6 +6,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   imports: false,
   manifest: {
+    minimum_chrome_version: '116',
     name: 'Paper Reader',
     description: 'Read, highlight and investigate PDFs in a focused workspace.',
     permissions: ['storage', 'activeTab', 'sidePanel'],

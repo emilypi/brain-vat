@@ -15,6 +15,15 @@ export async function extensionEnvironment(): Promise<ReaderEnvironment> {
   if (tabId === undefined) throw new Error('Open the reader in a browser tab.');
   return {
     nativePanel: true,
+    clear: async (sessionId) => {
+      const result = (await chrome.runtime.sendMessage({
+        type: 'clear',
+        sessionId,
+      })) as {
+        error?: string;
+      };
+      if (result.error) throw new Error(result.error);
+    },
     requestOrigin: async (url) => {
       const origins = [new URL(url).origin + '/*'];
       if (!(await chrome.permissions.request({ origins }))) {

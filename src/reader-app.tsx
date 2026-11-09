@@ -74,21 +74,29 @@ export function ReaderApp({
     setError(reason instanceof Error ? reason.message : 'Something went wrong.');
   }, []);
 
-  const openPaper = useCallback(async (next: Paper): Promise<void> => {
-    const generation = ++openGeneration.current;
-    setError('');
-    const saved = await listHighlights(next.id);
-    if (generation !== openGeneration.current) return;
-    setPaper(next);
-    setHighlights(saved);
-    setSelection(null);
-    setNotice('');
-    setPageIndex(0);
-    setRotation(0);
-    setRegionMode(false);
-    setSessionId(crypto.randomUUID());
-    location.hash = 'doc=' + next.id;
-  }, []);
+  const openPaper = useCallback(
+    async (next: Paper): Promise<void> => {
+      const generation = ++openGeneration.current;
+      setError('');
+      const saved = await listHighlights(next.id);
+      if (generation !== openGeneration.current) return;
+      const nextSession = crypto.randomUUID();
+      await environment.clear(nextSession);
+      if (generation !== openGeneration.current) return;
+      setPaper(next);
+      setHighlights(saved);
+      setSelection(null);
+      setNotice('');
+      setPageIndex(0);
+      setRotation(0);
+      setRegionMode(false);
+      setSessionId(nextSession);
+      const target = new URL(location.href);
+      target.hash = 'doc=' + next.id;
+      history.replaceState(null, '', target);
+    },
+    [environment],
+  );
 
   useEffect(() => {
     let cancelled = false;
