@@ -8,6 +8,7 @@ import {
   Search,
 } from 'lucide-react';
 import { findEvidence } from './document';
+import { ThemeToggle } from './theme-toggle';
 import type { AssistantContext } from './bridge';
 import type { Evidence } from './document';
 
@@ -17,6 +18,7 @@ interface AssistantPanelProps {
   onNavigate: (pageIndex: number) => void;
   onSave: () => void;
   notice: string;
+  showThemeToggle?: boolean;
 }
 
 export function AssistantPanel({
@@ -25,6 +27,7 @@ export function AssistantPanel({
   onNavigate,
   onSave,
   notice,
+  showThemeToggle = false,
 }: AssistantPanelProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -40,8 +43,11 @@ export function AssistantPanel({
   return (
     <aside className="assistant-panel" aria-label="Reading companion">
       <header className="panel-header">
-        <div className="eyebrow">
-          <span className="status-dot" /> READING COMPANION
+        <div className="panel-heading-row">
+          <div className="eyebrow">
+            <span className="status-dot" /> READING COMPANION
+          </div>
+          {showThemeToggle && <ThemeToggle />}
         </div>
         <h2>A little more context.</h2>
         <p>Follow an idea without losing your place.</p>

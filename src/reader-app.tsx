@@ -21,6 +21,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { AssistantPanel } from './assistant-panel';
+import { ThemeToggle } from './theme-toggle';
 import { WEB_ENVIRONMENT } from './bridge';
 import type { ReaderEnvironment } from './bridge';
 import {
@@ -358,6 +359,7 @@ export function ReaderApp({
             <span>{paper ? 'Reading room' : 'Welcome'}</span>
           </div>
           <div className="header-actions">
+            <ThemeToggle />
             {paper?.sourceUrl && (
               <a
                 href={paper.sourceUrl}

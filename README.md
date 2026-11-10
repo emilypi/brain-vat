@@ -17,6 +17,10 @@ Drag across text, choose **Save highlight**, then try zooming, rotating, or relo
 Use **Region** to capture an equation or figure. The panel searches the paper and
 returns passages with clickable page references.
 
+Use the sun/moon toggle in the header to switch light and dark modes. The palette
+includes the PDF display, remembers your choice, and follows your system preference
+until you choose a mode. The extension reader and its native panel share the choice.
+
 **Open a paper** accepts local PDFs, arXiv links, and ordinary public PDF URLs up to
 25 MB. In the web app, a remote server must permit browser cross-origin access;
 otherwise download the PDF and open the file. The extension can request site access

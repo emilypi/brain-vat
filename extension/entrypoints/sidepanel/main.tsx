@@ -77,6 +77,7 @@ function SidePanel(): React.JSX.Element {
   return (
     <div className="native-panel">
       <AssistantPanel
+        showThemeToggle
         key={active?.snapshot.sessionId ?? 'empty'}
         context={
           active && paper
