@@ -1,79 +1,106 @@
 # Brain Vat
 
-A local prototype for reading research papers with persistent highlights and a
-source-aware side panel. The local repository is named `brain-vat`.
+Read a paper closely, follow its sources, and work through ideas with other readers.
+Brain Vat runs as a web app and a Chrome extension, with light and dark themes.
 
-## Try it
+## Try it locally
 
-Use Node 24 or later and pnpm 10.13.1:
+Use Node 24 and pnpm 10.13.1:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm dev
+cp .env.example .env
+pnpm dev:all
 ```
 
-Open [the local reader](http://127.0.0.1:5173) and choose **Read the example paper**.
-Drag across text, choose **Save highlight**, then try zooming, rotating, or reloading.
-Use **Region** to capture an equation or figure. The panel searches the paper and
-returns passages with clickable page references.
+Open [Brain Vat](http://127.0.0.1:5173). Choose **Read the example paper**, upload a
+PDF, or open an arXiv/public PDF link. The local reader needs no account. It saves
+local papers and highlights in that browser. URL imports require the site's CORS
+permission; otherwise download the PDF and upload it, or use the extension.
 
-Use the sun/moon toggle in the header to switch light and dark modes. The palette
-includes the PDF display, remembers your choice, and follows your system preference
-until you choose a mode. The extension reader and its native panel share the choice.
+Select text or use **Region** for an equation or figure. Saved highlights follow
+zoom and rotation. Source overlays open safe links and preview reference metadata.
+**Enhanced reading** toggles between the PDF and a readable text/guide view.
+Extracted text may lose mathematical layout; citations return to the original page.
 
-**Open a paper** accepts local PDFs, arXiv links, and ordinary public PDF URLs up to
-25 MB. In the web app, a remote server must permit browser cross-origin access;
-otherwise download the PDF and open the file. The extension can request site access
-for the specific origin you choose.
+## Use Astra and shared rooms
 
-## Load the Chrome extension
+1. Put an OpenAI API key with Astra access in `.env` as `OPENAI_API_KEY=...`.
+   Restart the server. Keep the key on the server; never use a `VITE_` secret.
+2. Open **Workspace** and create the first account. Subsequent accounts need an
+   invitation by default. Usernames are handles, not verified identities.
+3. Open a paper, then choose **Upload paper and create room**. This sends its bytes
+   to your server. The server extracts text from those bytes in a bounded process.
+4. Ask a question, select **Expand definition**, or generate a reading guide.
+   Region questions attach a rendered PNG crop. These are user-supplied images;
+   they are not independently verified against the stored PDF.
+5. Expand **Shared room** to edit shared notes, opt into page presence, or create an
+   invite link. Invitees open it in a browser; the extension is optional.
+
+Everyone in a room shares highlights, notes, discussion, and AI conversations.
+Invites expire after 24 hours and can be used once. Owners can revoke invitations,
+remove readers, and delete rooms. Revocation stops new access; it cannot erase a
+PDF someone already downloaded. Shared PDFs are kept in memory by the reader,
+separately from the account-free local library. Notes have a local recovery draft
+and sync automatically; their status distinguishes local persistence from server
+acknowledgement. Sign-out removes the device's shared-note drafts.
+
+The initial adapter uses `gpt-6-astra` through the Responses API. `AiProvider` is
+replaceable. Answers cite server-owned evidence IDs; unknown citations are rejected.
+Origins are labeled **This paper**, **Cited reference**, or **External source**.
+Bibliography metadata is not evidence of a reference's full contents. External
+search summaries are identified as summaries, not quotations from fetched pages.
+Use the separate external-search field to choose what is sent to web search;
+private PDF passages are not included in that search request. The final synthesis
+does send relevant paper passages, selected images, and recent shared chat to the
+configured LLM API. Provider-side storage is disabled in the requests.
+
+Without a key, reading, accounts and collaboration work; AI requests show that
+configuration is missing. The integration is tested with injected provider responses.
+A live Astra response has not been verified without a configured key.
+
+## Chrome extension
 
 ```sh
 pnpm build:extension
 ```
 
-1. Open `chrome://extensions` in Chrome and enable **Developer mode**.
-2. Choose **Load unpacked** and select this project's `.output/chrome-mv3` folder.
-3. Pin **Brain Vat**. On an arXiv or PDF page, click its toolbar icon.
-4. Confirm the paper URL in the reader. Choose **Chrome panel** to use the native
-   side panel instead of the companion embedded in the reader.
+1. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
+2. Select `.output/chrome-mv3`, pin Brain Vat, and click it on a paper page.
+3. Use **Chrome panel** to move the companion into Chrome's native side panel.
+4. In **Workspace**, set the same server origin as the web app and sign in.
+   Add the extension's exact `chrome-extension://ID` origin to the server's
+   `ALLOWED_ORIGINS`. Chrome asks for access to that server when you connect.
 
-For development, `pnpm dev:extension` runs WXT's extension development workflow.
-The production package includes its PDF worker, fonts, CMaps, and image decoders.
-It does not load executable scripts from a CDN.
+The web app and extension have independent local libraries and sessions. Shared
+rooms synchronize through the server. The panel validates active tab, browser
+document, reader session, room, and PDF identity before using its context.
 
-## What works now
+`pnpm package:extension` creates `dist/brain-vat-chrome.zip`. Fonts, PDF workers,
+CMaps, and decoders are bundled. No executable scripts load from a CDN. Publishing
+to the Chrome Web Store remains an owner action; see [release notes](docs/RELEASE.md).
 
-- PDF.js canvas rendering and selectable text for text-based PDFs.
-- Local file imports and URL imports with a 25 MB limit and 30-second fetch timeout.
-- A bundled copy of the example paper, available without an external request.
-- Text highlights and rectangular equation/figure selections.
-- IndexedDB persistence, document deduplication by SHA-256 of the original bytes,
-  and normalized CropBox anchors that survive zoom and rotation.
-- Deterministic passage search, with provenance labeled **This paper** and page jumps.
-- Packaged Manifest V3 extension with a native side panel, active-tab context,
-  validated messages, and rejection of stale document/session navigation.
+## Hosting and recovery
 
-The web reader and extension share implementation but have separate browser storage
-origins. Their local libraries do not synchronize. Clearing browser data or removing
-the extension can remove locally saved work. There is no account or backup service.
+The first deployment is one Node service with a persistent SQLite database, including
+PDF bytes. It serves the built web app and API. It supports a small invited group,
+not horizontal replicas. [Hosting and backup instructions](docs/HOSTING.md) cover
+TLS, exact allowed origins, persistent storage, online backups and isolated recovery.
+No public service has been provisioned by this repository.
 
-## Deliberate prototype limits
+Useful limits: 25 MiB/PDF, 300 pages/PDF, 50 owned rooms and 1 GB of PDF bytes per
+account, 20 members/room, 1,000 highlights/room, 2,000 messages/room, two concurrent
+AI runs/room and 100 AI requests/account/day. The server also bounds aggregate room
+history, request sizes, authentication work, processing time and request rates.
+Failed or uncertain paid requests are never automatically resubmitted. Restarted
+runs remain visibly uncertain rather than being silently charged again.
 
-The panel is **local evidence search**, not a connected LLM. It does not generate
-answers, identify verified definitions, or retrieve outside sources. Region
-selections preserve geometry but do not interpret an equation or figure.
+Scanned PDFs support region selection but not OCR. Paywall integrations, mobile
+layout support, and comprehensive PDF accessibility remain outside this release.
+The next work item is a Lean-assisted tactical proof workspace; see
+[the workpile](docs/ROADMAP.md).
 
-The alphaXiv-style enhanced mode, definition tooltips, bibliography enrichment,
-replaceable hosted model providers, browser invitations, shared AI conversations,
-and CRDT collaboration remain planned. Scanned-PDF OCR, paywall integrations,
-mobile support, and formal proof checking are outside the initial product scope.
-
-The current UI renders one page at a time. PDF forms, scripts, multimedia and embedded
-PDF annotation links are not activated. Full PDF accessibility and comprehensive
-cross-browser support are not claimed by this prototype.
-
-## Development checks
+## Checks and code map
 
 ```sh
 pnpm check
@@ -85,24 +112,16 @@ pnpm test:e2e
 pnpm audit
 ```
 
-Unit tests cover coordinate transforms, unsafe URL forms, document identity, source
-lookup, and reader-session validation. Browser tests use the actual example PDF for
-selection, persistence, zoom, rotation, regions, source jumps and local uploads.
-The extension test opens a real native panel in packaged Chromium, rejects stale
-or inactive-tab navigation, accepts valid navigation, and clears context when the
-reader navigates away or a replacement PDF fails to parse.
+- `src/reader-app.tsx`, `src/pdf-page.tsx`: PDF reader, anchors and source overlays.
+- `src/assistant-panel.tsx`, `src/enhanced-reader.tsx`: shared AI and enhanced mode.
+- `src/workspace-contract.ts`, `src/workspace-client.ts`: domain contracts and client.
+- `src/workspace-panel.tsx`, `src/room-notes.tsx`: accounts, invitations and Yjs notes.
+- `server/app.ts`, `server/store.ts`: authenticated API and durable shared state.
+- `server/provider.ts`, `server/evidence.ts`: Astra and evidence validation.
+- `server/pdf-import.ts`, `server/pdf-worker.ts`: bounded PDF extraction.
+- `extension/`: packaged reader, native panel and validated active-tab messaging.
 
-The minimatch override pins the patched version for development-only dependency
-paths; remove it when the upstream packages adopt the fix.
-
-## Code map
-
-- `src/document.ts`: document identity, anchor geometry, input validation and evidence.
-- `src/storage.ts`: local papers and highlights in IndexedDB.
-- `src/pdf.ts`, `src/pdf-page.tsx`: PDF lifecycle, text selection and overlays.
-- `src/reader-app.tsx`, `src/assistant-panel.tsx`: shared reader and companion UI.
-- `src/bridge.ts`: validated extension messages and reader-environment contract.
-- `extension/`: background routing, reader entry point and native side panel.
-- `tests/`: domain checks and browser-level behavior.
-
+Tests cover account/room isolation, invite replay, revocation, concurrent notes,
+restart recovery, AI request idempotency, provider failure handling, and real browser
+reading flows. Test providers are explicit fixtures; tests do not incur LLM charges.
 See [THIRD_PARTY.md](THIRD_PARTY.md) for the example paper's attribution and license.
