@@ -107,7 +107,10 @@ test('the native panel isolates two reading rooms containing the same PDF', asyn
     );
     const reader = await context.newPage();
     await reader.goto(`${extensionOrigin}/reader.html#room=${first.id}`);
-    await expect(reader.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+    await expect(reader.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+      'data-ready',
+      'true',
+    );
     await reader.getByRole('button', { name: 'Reading options' }).click();
     await reader.getByRole('button', { name: 'Chrome panel' }).click();
     await expect
@@ -127,7 +130,10 @@ test('the native panel isolates two reading rooms containing the same PDF', asyn
 
     const other = await context.newPage();
     await other.goto(`${extensionOrigin}/reader.html#room=${second.id}`);
-    await expect(other.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+    await expect(other.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+      'data-ready',
+      'true',
+    );
     await other.getByRole('button', { name: 'Reading options' }).click();
     await other.getByRole('button', { name: 'Chrome panel' }).click();
     await expect
@@ -138,7 +144,9 @@ test('the native panel isolates two reading rooms containing the same PDF', asyn
       .not.toContain('A thought exclusively in the first room.');
     await other.getByRole('button', { name: 'Reading options' }).click();
     await other.getByRole('button', { name: 'Region', exact: true }).click();
-    const bounds = await other.getByTestId('region-layer').boundingBox();
+    const bounds = await other
+      .locator('.pdf-page[data-active="true"] [data-testid="region-layer"]')
+      .boundingBox();
     if (!bounds) throw new Error('Missing extension PDF region layer.');
     await other.mouse.move(bounds.x + 90, bounds.y + 80);
     await other.mouse.down();

@@ -84,3 +84,34 @@ export function usePdf(paper: Paper | null): PdfState {
         error: null,
       };
 }
+
+export async function destinationPage(
+  pdf: PDFDocumentProxy,
+  destination: string | unknown[] | null,
+): Promise<number | null> {
+  const target: unknown =
+    typeof destination === 'string'
+      ? await pdf.getDestination(destination)
+      : destination;
+  if (!Array.isArray(target)) return null;
+  const first: unknown = target[0];
+  if (
+    typeof first === 'number' &&
+    Number.isInteger(first) &&
+    first >= 0 &&
+    first < pdf.numPages
+  )
+    return first;
+  if (
+    first &&
+    typeof first === 'object' &&
+    'num' in first &&
+    'gen' in first &&
+    typeof first.num === 'number' &&
+    typeof first.gen === 'number'
+  ) {
+    const index = await pdf.getPageIndex({ num: first.num, gen: first.gen });
+    return index >= 0 && index < pdf.numPages ? index : null;
+  }
+  return null;
+}

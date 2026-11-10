@@ -21,7 +21,10 @@ test('native panel opens and rejects stale navigation', async () => {
     const reader = await context.newPage();
     await reader.goto(`chrome-extension://${extensionId}/reader.html`);
     await reader.getByRole('button', { name: 'Read the example paper' }).click();
-    await expect(reader.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+    await expect(reader.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+      'data-ready',
+      'true',
+    );
     await expect(reader.getByRole('alert')).toHaveCount(0);
     await reader.getByRole('button', { name: 'Reading options' }).click();
     await reader.getByRole('button', { name: 'Chrome panel' }).click();

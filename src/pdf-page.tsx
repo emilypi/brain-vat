@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist';
+import { destinationPage } from './pdf';
 import { pointToViewport, rectToQuad } from './document';
 import { findTextReferences, readLinkAnnotations } from './source-links';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
@@ -11,7 +12,8 @@ interface PdfPageProps {
   document: PDFDocumentProxy;
   documentId: string;
   pageIndex: number;
-  scale: number;
+  width: number;
+  active: boolean;
   showSources?: boolean;
   rotation: number;
   regionMode: boolean;
@@ -32,37 +34,6 @@ interface SourceOverlay {
   pageIndex: number | null;
 }
 
-async function destinationPage(
-  pdf: PDFDocumentProxy,
-  destination: string | unknown[] | null,
-): Promise<number | null> {
-  const target: unknown =
-    typeof destination === 'string'
-      ? await pdf.getDestination(destination)
-      : destination;
-  if (!Array.isArray(target)) return null;
-  const first: unknown = target[0];
-  if (
-    typeof first === 'number' &&
-    Number.isInteger(first) &&
-    first >= 0 &&
-    first < pdf.numPages
-  )
-    return first;
-  if (
-    first &&
-    typeof first === 'object' &&
-    'num' in first &&
-    'gen' in first &&
-    typeof first.num === 'number' &&
-    typeof first.gen === 'number'
-  ) {
-    const index = await pdf.getPageIndex({ num: first.num, gen: first.gen });
-    return index >= 0 && index < pdf.numPages ? index : null;
-  }
-  return null;
-}
-
 interface Geometry {
   width: number;
   height: number;
@@ -74,7 +45,8 @@ export function PdfPage({
   document,
   documentId,
   pageIndex,
-  scale,
+  width,
+  active,
   showSources = true,
   rotation,
   regionMode,
@@ -93,17 +65,6 @@ export function PdfPage({
   const [dragEnd, setDragEnd] = useState<Point | null>(null);
   const [sourceLinks, setSourceLinks] = useState<SourceOverlay[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
-  const [availableWidth, setAvailableWidth] = useState(0);
-
-  useEffect(() => {
-    const stage = surface.current?.parentElement;
-    if (!stage) return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setAvailableWidth(entry.contentRect.width);
-    });
-    observer.observe(stage);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,15 +75,13 @@ export function PdfPage({
     setError(null);
     setSourceLinks([]);
     setPreview(null);
-    if (availableWidth <= 0) return;
+    if (width <= 0) return;
     void (async () => {
       page = await document.getPage(pageIndex + 1);
       if (cancelled || !canvas.current || !textContainer.current) return;
       const pageRotation = (page.rotate + rotation) % 360;
       const original = page.getViewport({ scale: 1, rotation: pageRotation });
-      // Fit the default view, then apply the user's zoom relative to that fit.
-      const fittedScale = Math.min(840, availableWidth) / original.width;
-      const renderScale = fittedScale * (scale / 1.05);
+      const renderScale = width / original.width;
       const viewport = page.getViewport({ scale: renderScale, rotation: pageRotation });
       const transform = viewport.transform as unknown as Transform;
       const box = page.view as unknown as PageBox;
@@ -233,7 +192,7 @@ export function PdfPage({
       renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [document, pageIndex, scale, rotation, availableWidth]);
+  }, [document, pageIndex, width, rotation]);
 
   const captureText = (): void => {
     if (regionMode || !geometry || !surface.current || !ready) return;
@@ -312,6 +271,8 @@ export function PdfPage({
       ref={surface}
       className="pdf-page"
       data-testid="pdf-page"
+      data-active={active}
+      data-page-index={pageIndex}
       data-ready={ready}
       aria-label={'Page ' + (pageIndex + 1)}
       style={{ width: geometry?.width, height: geometry?.height }}

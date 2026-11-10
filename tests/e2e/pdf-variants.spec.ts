@@ -14,7 +14,7 @@ async function upload(page: Page, buffer: Buffer): Promise<void> {
 
 test('cropped and rotated PDF anchors retain their source links', async ({ page }) => {
   await upload(page, makePdfFixture({ cropped: true, rotated: true }));
-  const surface = page.getByTestId('pdf-page');
+  const surface = page.locator('.pdf-page[data-active="true"]');
   await expect(surface).toHaveAttribute('data-ready', 'true');
   const title = page
     .locator('.textLayer span')
@@ -33,7 +33,6 @@ test('cropped and rotated PDF anchors retain their source links', async ({ page 
   const mark = page.getByTestId('saved-highlight').first();
   const saved = await mark.boundingBox();
   expect(saved?.height).toBeCloseTo(initial.height, 0);
-  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(surface).toHaveAttribute('data-ready', 'true');
   const zoomed = await mark.boundingBox();
@@ -60,11 +59,16 @@ test('image-only PDFs retain region capture without inventing selectable text', 
   page,
 }) => {
   await upload(page, makePdfFixture({ imageOnly: true }));
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await expect(page.locator('.textLayer span')).toHaveCount(0);
   await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Region', exact: true }).click();
-  const region = await page.getByTestId('region-layer').boundingBox();
+  const region = await page
+    .locator('.pdf-page[data-active="true"] [data-testid="region-layer"]')
+    .boundingBox();
   if (!region) throw new Error('Missing region surface.');
   await page.mouse.move(region.x + 100, region.y + 180);
   await page.mouse.down();

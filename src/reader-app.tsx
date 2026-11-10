@@ -41,7 +41,8 @@ import {
 import type { Anchor, Highlight, Paper } from './document';
 import { createPaper, fetchPdf } from './import-paper';
 import { usePdf } from './pdf';
-import { PdfPage } from './pdf-page';
+import { PdfReader } from './pdf-reader';
+import type { PageNavigation } from './pdf-reader';
 import {
   getPaper,
   listHighlights,
@@ -73,6 +74,14 @@ export function ReaderApp({
   const [enhanced, setEnhanced] = useState(false);
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
   const [pageIndex, setPageIndex] = useState(0);
+  const [navigation, setNavigation] = useState<PageNavigation>({
+    pageIndex: 0,
+    revision: 0,
+  });
+  const navigateToPage = useCallback((index: number): void => {
+    setPageIndex(index);
+    setNavigation((current) => ({ pageIndex: index, revision: current.revision + 1 }));
+  }, []);
   const [scale, setScale] = useState(1.05);
   const [rotation, setRotation] = useState(0);
   const [regionMode, setRegionMode] = useState(false);
@@ -121,7 +130,7 @@ export function ReaderApp({
       setHighlights(saved);
       setSelection(null);
       setNotice('');
-      setPageIndex(0);
+      navigateToPage(0);
       setRotation(0);
       setRegionMode(false);
       setShowLibrary(false);
@@ -130,7 +139,7 @@ export function ReaderApp({
       target.hash = 'doc=' + next.id;
       history.replaceState(null, '', target);
     },
-    [environment],
+    [environment, navigateToPage],
   );
 
   const openRoom = useCallback(
@@ -159,7 +168,7 @@ export function ReaderApp({
         addedAt: next.createdAt,
         pageCount: next.pageCount,
       });
-      setPageIndex(0);
+      navigateToPage(0);
       setRotation(0);
       setShowLibrary(false);
       setSessionId(nextSession);
@@ -167,7 +176,7 @@ export function ReaderApp({
       target.hash = 'room=' + next.id;
       history.replaceState(null, '', target);
     },
-    [environment, service.client],
+    [environment, service.client, navigateToPage],
   );
 
   useEffect(() => {
@@ -263,9 +272,9 @@ export function ReaderApp({
           pdf.document &&
           index < pdf.document.numPages
         )
-          setPageIndex(index);
+          navigateToPage(index);
       }),
-    [environment, paper?.id, sessionId, pdf.document],
+    [environment, paper?.id, sessionId, pdf.document, navigateToPage],
   );
 
   useEffect(() => {
@@ -538,7 +547,7 @@ export function ReaderApp({
               <div className="saved-item" key={highlight.id}>
                 <button
                   onClick={() => {
-                    setPageIndex(highlight.anchor.pageIndex);
+                    navigateToPage(highlight.anchor.pageIndex);
                     setShowLibrary(false);
                   }}
                 >
@@ -613,39 +622,41 @@ export function ReaderApp({
         {paper ? (
           <>
             <h1 className="sr-only">{paper.title}</h1>
-            <div className="page-stage">
-              {enhanced ? (
+            {enhanced ? (
+              <div className="page-stage">
                 <EnhancedReader
                   pages={pdf.pages}
                   guide={room.connection?.state.guide ?? null}
                   canGenerate={Boolean(room.connection)}
                   onNavigate={(index) => {
-                    setPageIndex(index);
+                    navigateToPage(index);
                     setEnhanced(false);
                   }}
                 />
-              ) : pdf.document ? (
-                <PdfPage
-                  key={paper.id}
-                  document={pdf.document}
-                  documentId={paper.id}
-                  pageIndex={pageIndex}
-                  scale={scale}
-                  showSources={showSources}
-                  rotation={rotation}
-                  regionMode={regionMode}
-                  highlights={visibleHighlights}
-                  selection={selection}
-                  onNavigate={setPageIndex}
-                  onSelect={(anchor) => {
-                    setSelection(anchor);
-                    setNotice('');
-                  }}
-                />
-              ) : (
-                <div className="empty-stage">Opening your paper…</div>
-              )}
-            </div>
+              </div>
+            ) : pdf.document ? (
+              <PdfReader
+                key={paper.id}
+                document={pdf.document}
+                documentId={paper.id}
+                pageIndex={pageIndex}
+                navigation={navigation}
+                onVisiblePage={setPageIndex}
+                scale={scale}
+                showSources={showSources}
+                rotation={rotation}
+                regionMode={regionMode}
+                highlights={visibleHighlights}
+                selection={selection}
+                onNavigate={navigateToPage}
+                onSelect={(anchor) => {
+                  setSelection(anchor);
+                  setNotice('');
+                }}
+              />
+            ) : (
+              <div className="empty-stage">Opening your paper…</div>
+            )}
             <div className="reader-bottom">
               {selection && !showPanel && (
                 <div className="selection-shortcuts" aria-label="Selection actions">
@@ -674,7 +685,7 @@ export function ReaderApp({
                     className="icon-button"
                     aria-label="Previous page"
                     disabled={pageIndex === 0}
-                    onClick={() => setPageIndex(pageIndex - 1)}
+                    onClick={() => navigateToPage(pageIndex - 1)}
                   >
                     <ArrowLeft size={16} />
                   </button>
@@ -692,7 +703,7 @@ export function ReaderApp({
                           value > 0 &&
                           value <= pageCount
                         ) {
-                          setPageIndex(value - 1);
+                          navigateToPage(value - 1);
                         }
                       }}
                     />
@@ -702,32 +713,11 @@ export function ReaderApp({
                     className="icon-button"
                     aria-label="Next page"
                     disabled={pageIndex + 1 >= pageCount}
-                    onClick={() => setPageIndex(pageIndex + 1)}
+                    onClick={() => navigateToPage(pageIndex + 1)}
                   >
                     <ArrowRight size={16} />
                   </button>
                 </div>
-                <button
-                  className="icon-button"
-                  aria-label="Reading options"
-                  title="Reading options"
-                  popoverTarget="reading-options"
-                >
-                  <Settings2 size={17} />
-                </button>
-                <button
-                  ref={companionToggle}
-                  className="companion-toggle"
-                  aria-label="Toggle reading companion"
-                  aria-expanded={showPanel}
-                  aria-controls="reading-companion"
-                  onClick={() => setShowPanel(!showPanel)}
-                >
-                  <PanelRight size={17} /> <span>Ask</span>
-                </button>
-              </div>
-              <div id="reading-options" className="reading-options" popover="auto">
-                <h2>Reading options</h2>
                 <div className="toolbar-group zoom-controls">
                   <button
                     className="icon-button"
@@ -753,14 +743,36 @@ export function ReaderApp({
                   >
                     <ZoomIn size={16} />
                   </button>
-                  <button
-                    className="icon-button"
-                    aria-label="Rotate page"
-                    onClick={() => setRotation((rotation + 90) % 360)}
-                  >
-                    <RotateCw size={15} />
-                  </button>
                 </div>
+                <button
+                  className="icon-button"
+                  aria-label="Reading options"
+                  title="Reading options"
+                  popoverTarget="reading-options"
+                >
+                  <Settings2 size={17} />
+                </button>
+                <button
+                  ref={companionToggle}
+                  className="companion-toggle"
+                  aria-label="Toggle reading companion"
+                  aria-expanded={showPanel}
+                  aria-controls="reading-companion"
+                  onClick={() => setShowPanel(!showPanel)}
+                >
+                  <PanelRight size={17} /> <span>Ask</span>
+                </button>
+              </div>
+              <div id="reading-options" className="reading-options" popover="auto">
+                <h2>Reading options</h2>
+                <button
+                  className="icon-button"
+                  aria-label="Rotate page"
+                  onClick={() => setRotation((rotation + 90) % 360)}
+                >
+                  <RotateCw size={15} /> Rotate page
+                </button>
+
                 <button
                   className={'region-button' + (regionMode ? ' active' : '')}
                   aria-pressed={regionMode}
@@ -777,6 +789,7 @@ export function ReaderApp({
                   className={'region-button' + (enhanced ? ' active' : '')}
                   aria-pressed={enhanced}
                   onClick={(event) => {
+                    if (enhanced) navigateToPage(pageIndex);
                     setEnhanced(!enhanced);
                     event.currentTarget
                       .closest<HTMLElement>('[popover]')
@@ -894,7 +907,7 @@ export function ReaderApp({
               : null
           }
           indexing={pdf.indexing}
-          onNavigate={setPageIndex}
+          onNavigate={navigateToPage}
           onSave={saveSelection}
           notice={notice}
         />

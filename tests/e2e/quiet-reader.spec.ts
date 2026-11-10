@@ -5,7 +5,7 @@ for (const width of [1440, 800, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
     await page.getByRole('button', { name: 'Read the example paper' }).click();
-    const paper = page.getByTestId('pdf-page');
+    const paper = page.locator('.pdf-page[data-active="true"]');
     await expect(paper).toHaveAttribute('data-ready', 'true');
     await expect(page.getByRole('navigation', { name: 'Library' })).toBeHidden();
     await expect(page.getByRole('complementary')).toBeHidden();
@@ -20,9 +20,9 @@ for (const width of [1440, 800, 320]) {
     await library.click();
     await page.getByRole('searchbox', { name: 'Find a paper' }).fill('not in library');
     await expect(page.getByText('No papers match your search.')).toBeVisible();
-    await page.getByRole('searchbox').fill('Semirings');
+    await page.getByRole('searchbox', { name: 'Find a paper' }).fill('Semirings');
     await expect(page.locator('#reader-library .library-paper')).toBeVisible();
-    await page.getByRole('searchbox').press('Escape');
+    await page.getByRole('searchbox', { name: 'Find a paper' }).press('Escape');
     await expect(library).toBeFocused();
     await expect(page.getByRole('navigation', { name: 'Library' })).toBeHidden();
 
@@ -36,8 +36,10 @@ for (const width of [1440, 800, 320]) {
 
     await page.getByRole('button', { name: 'Reading options' }).click();
     await expect(page.getByRole('button', { name: 'Zoom in' })).toBeVisible();
-    await page.getByRole('button', { name: 'Zoom in' }).press('Escape');
-    await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();
+    await page.getByRole('button', { name: 'Rotate page' }).press('Escape');
+    await expect(page.getByRole('button', { name: 'Zoom in' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Zoom out' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reset zoom to fit' })).toBeVisible();
     await page.getByRole('button', { name: 'Next page' }).click();
     await expect(page.getByRole('spinbutton')).toHaveValue('2');
     await expect(paper).toHaveAttribute('data-ready', 'true');

@@ -89,12 +89,18 @@ test('invited readers share notes, highlights and one AI conversation', async ({
   await configure(context);
   await page.goto('/');
   await page.getByRole('button', { name: 'Read the example paper' }).click();
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await page.getByRole('button', { name: 'Workspace', exact: true }).click();
   await createAccount(page, 'owner');
   await page.getByRole('button', { name: 'Upload paper and create room' }).click();
   await expect(page.locator('.workspace-dialog')).toHaveCount(0);
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await page.getByRole('button', { name: 'Library', exact: true }).click();
   await page.locator('.room-inspector > summary').click();
   await page.getByRole('button', { name: 'Create invite link' }).click();
@@ -109,7 +115,10 @@ test('invited readers share notes, highlights and one AI conversation', async ({
   await invited.goto('/' + new URL(link).hash);
   await createAccount(invited, 'reader');
   await invited.locator('.rooms-list .library-paper').first().click();
-  await expect(invited.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(invited.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await invited.getByRole('button', { name: 'Library', exact: true }).click();
   await invited.locator('.room-inspector > summary').click();
 
@@ -128,7 +137,9 @@ test('invited readers share notes, highlights and one AI conversation', async ({
   await invited.getByRole('button', { name: 'Toggle reading companion' }).click();
   await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Region', exact: true }).click();
-  const bounds = await page.getByTestId('region-layer').boundingBox();
+  const bounds = await page
+    .locator('.pdf-page[data-active="true"] [data-testid="region-layer"]')
+    .boundingBox();
   if (!bounds) throw new Error('Missing region layer.');
   await page.mouse.move(bounds.x + 80, bounds.y + 60);
   await page.mouse.down();
@@ -161,7 +172,7 @@ test('invited readers share notes, highlights and one AI conversation', async ({
   await page.getByRole('button', { name: 'Library', exact: true }).click();
   await page.locator('.room-inspector > summary').click();
   await page.getByRole('button', { name: 'Remove reader', exact: true }).click();
-  await expect(invited.getByTestId('pdf-page')).toHaveCount(0);
+  await expect(invited.locator('.pdf-page[data-active="true"]')).toHaveCount(0);
   await expect(
     invited.getByText('A semiring supports addition and multiplication.'),
   ).toHaveCount(0);

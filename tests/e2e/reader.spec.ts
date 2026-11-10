@@ -4,7 +4,10 @@ import type { Page } from '@playwright/test';
 async function openExample(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: 'Read the example paper' }).click();
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await page.getByRole('button', { name: 'Toggle reading companion' }).click();
 }
 
@@ -33,16 +36,26 @@ test('text anchors survive zoom, rotation and reopening the PDF', async ({ page 
   await expect(polygon).toBeVisible();
   const before = await polygon.boundingBox();
   if (!before) throw new Error('Missing saved highlight.');
-  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   const zoomed = await polygon.boundingBox();
   expect(zoomed?.width).toBeCloseTo(before.width * (1.2 / 1.05), 0);
-  const pageBeforeRotation = await page.getByTestId('pdf-page').boundingBox();
+  const pageBeforeRotation = await page
+    .locator('.pdf-page[data-active="true"]')
+    .boundingBox();
+  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Rotate page' }).click();
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   const rotated = await polygon.boundingBox();
-  const pageAfterRotation = await page.getByTestId('pdf-page').boundingBox();
+  const pageAfterRotation = await page
+    .locator('.pdf-page[data-active="true"]')
+    .boundingBox();
   if (!pageBeforeRotation || !pageAfterRotation || !zoomed || !rotated) {
     throw new Error('Missing rotated page or highlight.');
   }
@@ -52,7 +65,10 @@ test('text anchors survive zoom, rotation and reopening the PDF', async ({ page 
     3,
   );
   await page.reload();
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await expect(polygon).toBeVisible();
   await page.getByRole('button', { name: 'Library', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Delete highlight' })).toHaveCount(1);
@@ -60,7 +76,10 @@ test('text anchors survive zoom, rotation and reopening the PDF', async ({ page 
   await page.getByRole('button', { name: 'Delete highlight' }).click();
   await expect(polygon).toHaveCount(0);
   await page.reload();
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await expect(polygon).toHaveCount(0);
 });
 
@@ -68,7 +87,9 @@ test('region capture saves independently of selectable text', async ({ page }) =
   await openExample(page);
   await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Region', exact: true }).click();
-  const bounds = await page.getByTestId('region-layer').boundingBox();
+  const bounds = await page
+    .locator('.pdf-page[data-active="true"] [data-testid="region-layer"]')
+    .boundingBox();
   if (!bounds) throw new Error('Missing region surface.');
   await page.mouse.move(bounds.x + 90, bounds.y + 90);
   await page.mouse.down();

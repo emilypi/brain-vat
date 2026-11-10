@@ -21,14 +21,16 @@ permission; otherwise download the PDF and upload it, or use the extension.
 The design principle is a lightweight overlay that enhances legibility at all times.
 The paper opens without a title banner; the library and companion start collapsed.
 Use **Library** in the slim left rail to find papers, highlights and room notes.
-The bottom dock holds page navigation, **Reading options**, and **Ask**. Closing the
+The bottom dock holds page navigation, zoom, **Reading options**, and **Ask**. Closing the
 companion preserves an unfinished question. The rail's theme toggle switches between
 bright cream and neutral charcoal, and remembers the choice.
 
-Select text to save a highlight or ask about it. **Reading options** contains zoom,
-rotation, **Region** capture, source visibility and **Enhanced reading**. PDFs fit
-the available width by default; saved highlights follow zoom and rotation. Source
-overlays preview reference metadata. Enhanced reading provides a text/guide view;
+Scroll continuously through the PDF; nearby pages render as you reach them. Zoom
+stays visible and preserves your reading position. Select text to save a highlight
+or ask about it. **Reading options** contains rotation, **Region** capture, source
+visibility and **Enhanced reading**. PDFs fit the available width by default;
+saved highlights follow zoom and rotation. Blue underlines mark source links,
+with reference previews on hover or keyboard focus. Enhanced reading provides a text/guide view;
 extracted text may lose mathematical layout, so citations return to the PDF.
 
 ## Ask Astra while reading solo
@@ -132,12 +134,13 @@ pnpm test:e2e
 pnpm audit
 ```
 
-- `src/reader-app.tsx`, `src/pdf-page.tsx`: PDF reader, anchors and source overlays.
+- `src/reader-app.tsx`, `src/pdf-reader.tsx`, `src/pdf-page.tsx`: continuous PDF reader.
 - `src/assistant-panel.tsx`, `src/enhanced-reader.tsx`: shared AI and enhanced mode.
 - `src/workspace-contract.ts`, `src/workspace-client.ts`: domain contracts and client.
 - `src/workspace-panel.tsx`, `src/room-notes.tsx`: accounts, invitations and Yjs notes.
 - `server/app.ts`, `server/store.ts`: authenticated API and durable shared state.
 - `server/provider.ts`, `server/evidence.ts`: Astra and evidence validation.
+- `server/solo.ts`: local, ephemeral AI sessions without an account.
 - `server/pdf-import.ts`, `server/pdf-worker.ts`: bounded PDF extraction.
 - `extension/`: packaged reader, native panel and validated active-tab messaging.
 

@@ -109,7 +109,7 @@ export function makePdfFixture(options: FixtureOptions = {}): Buffer {
   const crop = options.cropped ? '/CropBox [40 50 440 590]' : '';
   const rotation = options.rotated ? '/Rotate 90' : '';
   const annotations = options.imageOnly || options.encrypted ? '' : '/Annots [6 0 R]';
-  const objects = [
+  const objects: Buffer[] = [
     Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
     Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
     Buffer.from(
@@ -131,4 +131,39 @@ export function makePdfFixture(options: FixtureOptions = {}): Buffer {
   ];
   if (encryption) objects.push(encryption);
   return serialize(objects, trailer);
+}
+
+export function makeScrollingPdfFixture(): Buffer {
+  const pageCount = 12;
+  const pageId = (index: number): number => 4 + index * 3;
+  const kids = Array.from({ length: pageCount }, (_, index) => `${pageId(index)} 0 R`);
+  const objects: Buffer[] = [
+    Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
+    Buffer.from(`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pageCount} >>`),
+    Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
+  ];
+  for (let index = 0; index < pageCount; index += 1) {
+    const id = pageId(index);
+    const box = index % 2 ? '[0 0 500 700]' : '[0 0 480 640]';
+    const rotation = index === 2 ? '/Rotate 90' : '';
+    objects.push(
+      Buffer.from(
+        `<< /Type /Page /Parent 2 0 R /MediaBox ${box} ${rotation} ` +
+          `/Resources << /Font << /F1 3 0 R >> >> /Contents ${id + 1} 0 R ` +
+          `/Annots [${id + 2} 0 R] >>`,
+      ),
+      stream(
+        Buffer.from(
+          `BT /F1 18 Tf 80 520 Td (Reading page ${index + 1}) Tj ` +
+            '0 -55 Td (Go to the last page) Tj ' +
+            '0 -45 Td (A definition with supporting evidence.) Tj ET',
+        ),
+      ),
+      Buffer.from(
+        '<< /Type /Annot /Subtype /Link /Rect [80 460 260 484] ' +
+          `/Border [0 0 0] /Dest [${pageId(pageCount - 1)} 0 R /Fit] >>`,
+      ),
+    );
+  }
+  return serialize(objects);
 }

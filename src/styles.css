@@ -36,6 +36,9 @@
   --pdf-paper: #fffdf7;
   --pdf-filter: sepia(0.12);
   --highlight-blend: multiply;
+  --link: #2563a6;
+  --link-wash: #357bc51a;
+  --link-hover: #357bc538;
 }
 
 :root[data-theme='dark'] {
@@ -68,6 +71,9 @@
   --pdf-paper: #242424;
   --pdf-filter: invert(0.86) hue-rotate(180deg);
   --highlight-blend: screen;
+  --link: #8abaff;
+  --link-wash: #72adff20;
+  --link-hover: #72adff40;
 }
 
 .theme-toggle {
@@ -587,6 +593,21 @@ h1 {
   box-shadow: 0 2px 9px #23321b14;
   isolation: isolate;
 }
+.continuous-pages {
+  overflow-anchor: none;
+  position: relative;
+}
+.pdf-page-slot {
+  position: relative;
+  margin: 0 auto 18px;
+  background: var(--pdf-paper);
+}
+.page-placeholder {
+  display: block;
+  padding: 18px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
 .pdf-page > canvas {
   display: block;
   filter: var(--pdf-filter, none);
@@ -1042,8 +1063,19 @@ h1 {
     padding-inline: 4px;
   }
   .reader-toolbar {
-    gap: 2px;
+    gap: 4px;
     padding-inline: 4px;
+    flex-wrap: wrap;
+    width: max-content;
+  }
+  .reader-toolbar .toolbar-group {
+    gap: 0;
+  }
+  .reader-toolbar .icon-button {
+    min-width: 26px;
+  }
+  .reader-toolbar .zoom-value {
+    width: 38px;
   }
   .companion-toggle span {
     display: none;
