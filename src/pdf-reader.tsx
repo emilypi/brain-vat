@@ -9,6 +9,7 @@ import {
 import { PdfPage } from './pdf-page';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { Anchor, Highlight } from './document';
+import type { SelectionMode } from './selection-geometry';
 
 export interface PageNavigation {
   pageIndex: number;
@@ -22,11 +23,11 @@ interface PdfReaderProps {
   navigation: PageNavigation;
   scale: number;
   rotation: number;
-  regionMode: boolean;
+  selectionMode: SelectionMode;
   showSources: boolean;
   highlights: Highlight[];
   selection: Anchor | null;
-  onSelect: (anchor: Anchor) => void;
+  onSelect: (anchor: Anchor | null) => void;
   onNavigate: (pageIndex: number) => void;
   onVisiblePage: (pageIndex: number) => void;
 }
@@ -49,7 +50,7 @@ export function PdfReader({
   navigation,
   scale,
   rotation,
-  regionMode,
+  selectionMode,
   showSources,
   highlights,
   selection,
@@ -212,7 +213,7 @@ export function PdfReader({
                   width={item.width}
                   active={item.pageIndex === pageIndex}
                   rotation={rotation}
-                  regionMode={regionMode}
+                  selectionMode={selectionMode}
                   showSources={showSources}
                   highlights={highlights}
                   selection={selection}

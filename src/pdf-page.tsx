@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist';
 import { destinationPage } from './pdf';
+import { SelectionTool } from './selection-tool';
 import { pointToViewport, rectToQuad } from './document';
 import { findTextReferences, readLinkAnnotations } from './source-links';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
-import type { Anchor, Highlight, PageBox, Point, Transform } from './document';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { Anchor, Highlight, PageBox, Transform } from './document';
+import type { SelectionMode } from './selection-geometry';
 import './research.css';
 
 interface PdfPageProps {
@@ -16,10 +17,10 @@ interface PdfPageProps {
   active: boolean;
   showSources?: boolean;
   rotation: number;
-  regionMode: boolean;
+  selectionMode: SelectionMode;
   highlights: Highlight[];
   selection: Anchor | null;
-  onSelect: (anchor: Anchor) => void;
+  onSelect: (anchor: Anchor | null) => void;
   onNavigate?: (pageIndex: number) => void;
 }
 
@@ -49,7 +50,7 @@ export function PdfPage({
   active,
   showSources = true,
   rotation,
-  regionMode,
+  selectionMode,
   highlights,
   selection,
   onSelect,
@@ -61,8 +62,6 @@ export function PdfPage({
   const [geometry, setGeometry] = useState<Geometry | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dragStart, setDragStart] = useState<Point | null>(null);
-  const [dragEnd, setDragEnd] = useState<Point | null>(null);
   const [sourceLinks, setSourceLinks] = useState<SourceOverlay[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
 
@@ -195,7 +194,7 @@ export function PdfPage({
   }, [document, pageIndex, width, rotation]);
 
   const captureText = (): void => {
-    if (regionMode || !geometry || !surface.current || !ready) return;
+    if (selectionMode || !geometry || !surface.current || !ready) return;
     const selected = window.getSelection();
     if (!selected || selected.isCollapsed || selected.rangeCount === 0) return;
     const range = selected.getRangeAt(0);
@@ -224,31 +223,6 @@ export function PdfPage({
       quote: selected.toString().slice(0, 20000),
       quads,
     });
-  };
-
-  const pointerPosition = (event: ReactPointerEvent): Point => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
-  };
-
-  const finishRegion = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (!dragStart || !geometry) return;
-    const start = dragStart;
-    const end = pointerPosition(event);
-    setDragStart(null);
-    setDragEnd(null);
-    if (Math.abs(start.x - end.x) < 5 || Math.abs(start.y - end.y) < 5) return;
-    const quad = rectToQuad(
-      {
-        left: Math.min(start.x, end.x),
-        top: Math.min(start.y, end.y),
-        right: Math.max(start.x, end.x),
-        bottom: Math.max(start.y, end.y),
-      },
-      geometry.transform,
-      geometry.box,
-    );
-    onSelect({ documentId, pageIndex, kind: 'region', quote: '', quads: [quad] });
   };
 
   const polygons = highlights
@@ -281,7 +255,7 @@ export function PdfPage({
     >
       <canvas ref={canvas} aria-hidden="true" />
       <div ref={textContainer} className="textLayer" />
-      {ready && sourceLinks.length > 0 && !regionMode && (
+      {ready && sourceLinks.length > 0 && !selectionMode && (
         <>
           {showSources && (
             <div className="pdf-source-layer" aria-label="Paper sources">
@@ -371,36 +345,19 @@ export function PdfPage({
           ))}
         </svg>
       )}
-      {regionMode && (
-        <div
-          className="region-layer"
-          data-testid="region-layer"
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setDragStart(pointerPosition(event));
-            setDragEnd(pointerPosition(event));
-          }}
-          onPointerMove={(event) => {
-            if (dragStart) setDragEnd(pointerPosition(event));
-          }}
-          onPointerUp={finishRegion}
-          onPointerCancel={() => {
-            setDragStart(null);
-            setDragEnd(null);
-          }}
-        >
-          {dragStart && dragEnd && (
-            <div
-              className="region-preview"
-              style={{
-                left: Math.min(dragStart.x, dragEnd.x),
-                top: Math.min(dragStart.y, dragEnd.y),
-                width: Math.abs(dragStart.x - dragEnd.x),
-                height: Math.abs(dragStart.y - dragEnd.y),
-              }}
-            />
-          )}
-        </div>
+      {selectionMode && geometry && (
+        <SelectionTool
+          key={selectionMode}
+          documentId={documentId}
+          pageIndex={pageIndex}
+          mode={selectionMode}
+          geometry={geometry}
+          canvas={canvas}
+          textLayer={textContainer}
+          selection={selection?.pageIndex === pageIndex ? selection : null}
+          disabled={!ready}
+          onSelect={onSelect}
+        />
       )}
       {!ready && !error && <div className="page-loading">Rendering page…</div>}
       {error && (

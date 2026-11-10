@@ -526,8 +526,7 @@ h1 {
 .reading-options > a:hover {
   background: var(--surface-hover);
 }
-.selection-shortcuts,
-.region-hint {
+.selection-shortcuts {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -535,10 +534,6 @@ h1 {
   margin: 0 0 9px;
   color: var(--text-muted);
   font-size: 11px;
-}
-.region-hint button {
-  color: var(--text-accent);
-  text-decoration: underline;
 }
 .quiet-notice {
   font-size: 11px;
@@ -660,18 +655,135 @@ h1 {
   fill: #75ad90;
   fill-opacity: 0.3;
 }
-.region-layer {
+.precision-layer {
   position: absolute;
   inset: 0;
   z-index: 4;
   cursor: crosshair;
   touch-action: none;
+  user-select: none;
 }
-.region-preview {
+.precision-box {
   position: absolute;
-  background: #8bac7e30;
-  border: 1px solid #608a59;
+  border: 1.5px solid var(--link);
+  background: #528ed00a;
+}
+.precision-move {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: move;
+}
+.precision-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--link);
+  background: var(--surface);
+  border-radius: 2px;
+}
+.handle-n,
+.handle-s {
+  cursor: ns-resize;
+}
+.handle-e,
+.handle-w {
+  cursor: ew-resize;
+}
+.handle-nw,
+.handle-se {
+  cursor: nwse-resize;
+}
+.handle-ne,
+.handle-sw {
+  cursor: nesw-resize;
+}
+.snapped-word {
+  position: absolute;
+  background: #528ed040;
   pointer-events: none;
+}
+.precision-status {
+  position: absolute;
+  max-width: 230px;
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--line);
+  font-size: 10px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.selection-magnifier {
+  position: fixed;
+  z-index: 12;
+  width: 170px;
+  height: 114px;
+  border: 1px solid var(--link);
+  border-radius: 6px;
+  box-shadow: 0 3px 14px #0004;
+  overflow: hidden;
+  pointer-events: none;
+}
+.selection-magnifier canvas {
+  display: block;
+  filter: var(--pdf-filter);
+}
+.selection-magnifier::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--link);
+  border-radius: 50%;
+}
+.selection-magnifier span {
+  position: absolute;
+  bottom: 3px;
+  right: 4px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.precision-controls {
+  margin: 0 auto 8px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.precision-controls > span {
+  display: block;
+  margin-top: 4px;
+}
+.precision-mode-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.precision-mode-buttons button {
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.precision-mode-buttons [aria-pressed='true'],
+.reader-toolbar [aria-pressed='true'] {
+  color: var(--text-accent);
+  background: var(--surface-selected);
 }
 .page-loading {
   position: absolute;

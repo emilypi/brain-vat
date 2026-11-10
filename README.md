@@ -35,6 +35,15 @@ saved highlights follow zoom and rotation. Blue underlines mark source links,
 with reference previews on hover or keyboard focus. Enhanced reading provides a text/guide view;
 extracted text may lose mathematical layout, so citations return to the PDF.
 
+Use the **Highlight tool** in the dock when ordinary text selection is awkward.
+**Text** snaps a click to one word or selects words inside a drawn box, keeping
+neighboring columns out. **Area** captures an equation, figure, or scanned passage.
+A 2.5× preview appears while drawing or resizing. Drag the box to move it, or use
+its eight handles to refine the edges. Focus the box or a handle and use arrow
+keys for one-pixel adjustments; Shift increases the step to ten pixels. Escape
+cancels a drawing or clears the box. **Save highlight** and **Ask about selection**
+use the refined selection; **Done** returns to ordinary PDF selection.
+
 ## Ask Astra while reading solo
 
 Put `OPENAI_API_KEY=...` in `.env` and restart the server. Open a local paper and

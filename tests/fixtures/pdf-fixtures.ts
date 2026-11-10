@@ -5,6 +5,7 @@ interface FixtureOptions {
   rotated?: boolean;
   imageOnly?: boolean;
   encrypted?: boolean;
+  columns?: boolean;
 }
 
 function md5(bytes: Uint8Array): Buffer {
@@ -73,9 +74,15 @@ function serialize(objects: Buffer[], trailer = ''): Buffer {
 export function makePdfFixture(options: FixtureOptions = {}): Buffer {
   const content = options.imageOnly
     ? 'q 260 0 0 180 90 260 cm /Im0 Do Q'
-    : 'BT /F1 18 Tf 80 520 Td (Rotated crop evidence) Tj ' +
-      '0 -55 Td (https://example.org/evidence) Tj ' +
-      '0 -45 Td (A cited statement [7].) Tj ET';
+    : options.columns
+      ? 'BT /F1 14 Tf 1 0 0 1 70 520 Tm (Alpha precise words) Tj ' +
+        '1 0 0 1 300 520 Tm (Other column ignored) Tj ' +
+        '1 0 0 1 70 492 Tm (Second selected line) Tj ' +
+        '1 0 0 1 300 492 Tm (Never include this) Tj ' +
+        '1 0 0 1 70 430 Tm (x = a + b) Tj ET'
+      : 'BT /F1 18 Tf 80 520 Td (Rotated crop evidence) Tj ' +
+        '0 -55 Td (https://example.org/evidence) Tj ' +
+        '0 -45 Td (A cited statement [7].) Tj ET';
   let contentBytes: Buffer = Buffer.from(content);
   let encryption: Buffer | null = null;
   let trailer = '';

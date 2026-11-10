@@ -44,6 +44,7 @@ import { usePdf } from './pdf';
 import { PdfReader } from './pdf-reader';
 import { PdfOutline } from './pdf-outline';
 import type { PageNavigation } from './pdf-reader';
+import type { SelectionMode } from './selection-geometry';
 import {
   getPaper,
   listHighlights,
@@ -85,7 +86,7 @@ export function ReaderApp({
   }, []);
   const [scale, setScale] = useState(1.05);
   const [rotation, setRotation] = useState(0);
-  const [regionMode, setRegionMode] = useState(false);
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>(null);
   const [selection, setSelection] = useState<Anchor | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [notice, setNotice] = useState('');
@@ -137,7 +138,7 @@ export function ReaderApp({
       setNotice('');
       navigateToPage(0);
       setRotation(0);
-      setRegionMode(false);
+      setSelectionMode(null);
       setShowLibrary(false);
       setSessionId(nextSession);
       const target = new URL(location.href);
@@ -665,7 +666,7 @@ export function ReaderApp({
                 scale={scale}
                 showSources={showSources}
                 rotation={rotation}
-                regionMode={regionMode}
+                selectionMode={selectionMode}
                 highlights={visibleHighlights}
                 selection={selection}
                 onNavigate={navigateToPage}
@@ -688,11 +689,36 @@ export function ReaderApp({
                   </button>
                 </div>
               )}
-              {regionMode && (
-                <p className="region-hint">
-                  Drag around an equation or figure.
-                  <button onClick={() => setRegionMode(false)}>Done</button>
-                </p>
+              {selectionMode && !enhanced && (
+                <div className="precision-controls" aria-label="Highlight tools">
+                  <div className="precision-mode-buttons">
+                    <button
+                      aria-pressed={selectionMode === 'text'}
+                      onClick={() => {
+                        setSelectionMode('text');
+                        setSelection(null);
+                      }}
+                    >
+                      Text
+                    </button>
+                    <button
+                      aria-pressed={selectionMode === 'region'}
+                      onClick={() => {
+                        setSelectionMode('region');
+                        setSelection(null);
+                      }}
+                    >
+                      Area
+                    </button>
+                    <button onClick={() => setSelectionMode(null)}>Done</button>
+                  </div>
+                  <span>
+                    {selectionMode === 'text'
+                      ? 'Click a word or draw a box. Drag handles to refine.'
+                      : 'Draw around an equation or figure. Drag handles to refine.'}
+                  </span>
+                  <span>Arrow keys adjust · Shift for larger steps · Esc clears</span>
+                </div>
               )}
               {notice && !showPanel && (
                 <p className="quiet-notice" role="status">
@@ -766,6 +792,20 @@ export function ReaderApp({
                 </div>
                 <button
                   className="icon-button"
+                  aria-label="Highlight tool"
+                  title="Precise highlighting"
+                  aria-pressed={selectionMode !== null}
+                  onClick={() => {
+                    setEnhanced(false);
+                    setSelectionMode(
+                      selectionMode ? null : (selection?.kind ?? 'text'),
+                    );
+                  }}
+                >
+                  <Highlighter size={17} />
+                </button>
+                <button
+                  className="icon-button"
                   aria-label="Reading options"
                   title="Reading options"
                   popoverTarget="reading-options"
@@ -794,10 +834,13 @@ export function ReaderApp({
                 </button>
 
                 <button
-                  className={'region-button' + (regionMode ? ' active' : '')}
-                  aria-pressed={regionMode}
+                  className={
+                    'region-button' + (selectionMode === 'region' ? ' active' : '')
+                  }
+                  aria-pressed={selectionMode === 'region'}
                   onClick={(event) => {
-                    setRegionMode(!regionMode);
+                    setEnhanced(false);
+                    setSelectionMode(selectionMode === 'region' ? null : 'region');
                     event.currentTarget
                       .closest<HTMLElement>('[popover]')
                       ?.hidePopover();
