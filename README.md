@@ -21,6 +21,8 @@ permission; otherwise download the PDF and upload it, or use the extension.
 The design principle is a lightweight overlay that enhances legibility at all times.
 The paper opens without a title banner; the library and companion start collapsed.
 Use **Library** in the slim left rail to find papers, highlights and room notes.
+Its **Contents** browser shows the PDF's embedded section hierarchy, with search
+and page links. PDFs without an embedded outline say so; headings are not inferred.
 The bottom dock holds page navigation, zoom, **Reading options**, and **Ask**. Closing the
 companion preserves an unfinished question. The rail's theme toggle switches between
 bright cream and neutral charcoal, and remembers the choice.

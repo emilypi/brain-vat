@@ -42,6 +42,7 @@ import type { Anchor, Highlight, Paper } from './document';
 import { createPaper, fetchPdf } from './import-paper';
 import { usePdf } from './pdf';
 import { PdfReader } from './pdf-reader';
+import { PdfOutline } from './pdf-outline';
 import type { PageNavigation } from './pdf-reader';
 import {
   getPaper,
@@ -100,13 +101,17 @@ export function ReaderApp({
   const [showSources, setShowSources] = useState(true);
   const libraryToggle = useRef<HTMLButtonElement>(null);
   const librarySearch = useRef<HTMLInputElement>(null);
+  const libraryPanel = useRef<HTMLElement>(null);
   const companionToggle = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const pdf = usePdf(paper);
   const openGeneration = useRef(0);
 
   useEffect(() => {
-    if (showLibrary) librarySearch.current?.focus();
+    if (showLibrary) {
+      libraryPanel.current?.focus();
+      if (libraryPanel.current) libraryPanel.current.scrollTop = 0;
+    }
   }, [showLibrary]);
 
   const report = useCallback((reason: unknown): void => {
@@ -462,6 +467,8 @@ export function ReaderApp({
         id="reader-library"
         className="library-sidebar"
         aria-label="Library"
+        ref={libraryPanel}
+        tabIndex={-1}
         hidden={!showLibrary}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -495,6 +502,19 @@ export function ReaderApp({
           <Plus size={16} /> Open a paper
         </button>
         <div className="library-section">
+          {pdf.document && (
+            <PdfOutline
+              key={paper?.id}
+              document={pdf.document}
+              pageIndex={pageIndex}
+              onNavigate={(index) => {
+                navigateToPage(index);
+                setEnhanced(false);
+                setShowLibrary(false);
+                libraryToggle.current?.focus();
+              }}
+            />
+          )}
           <div className="section-label">
             YOUR LIBRARY <span>{library.length}</span>
           </div>

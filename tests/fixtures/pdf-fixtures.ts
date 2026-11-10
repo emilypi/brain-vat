@@ -138,7 +138,10 @@ export function makeScrollingPdfFixture(): Buffer {
   const pageId = (index: number): number => 4 + index * 3;
   const kids = Array.from({ length: pageCount }, (_, index) => `${pageId(index)} 0 R`);
   const objects: Buffer[] = [
-    Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
+    Buffer.from(
+      '<< /Type /Catalog /Pages 2 0 R /Outlines 40 0 R ' +
+        `/Names << /Dests << /Names [(proof) [${pageId(8)} 0 R /Fit]] >> >> >>`,
+    ),
     Buffer.from(`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pageCount} >>`),
     Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
   ];
@@ -165,5 +168,17 @@ export function makeScrollingPdfFixture(): Buffer {
       ),
     );
   }
+  objects.push(
+    Buffer.from('<< /Type /Outlines /First 41 0 R /Last 43 0 R /Count 3 >>'),
+    Buffer.from(
+      '<< /Title (Introduction) /Parent 40 0 R /Next 43 0 R ' +
+        '/First 42 0 R /Last 42 0 R /Count 1 /Dest [4 0 R /Fit] >>',
+    ),
+    Buffer.from('<< /Title (Proof details) /Parent 41 0 R /Dest (proof) >>'),
+    Buffer.from(
+      '<< /Title (Conclusion) /Parent 40 0 R /Prev 41 0 R ' +
+        `/Dest [${pageId(11)} 0 R /Fit] >>`,
+    ),
+  );
   return serialize(objects);
 }
