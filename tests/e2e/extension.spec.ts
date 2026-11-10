@@ -21,6 +21,7 @@ test('native panel opens and rejects stale navigation', async () => {
     await reader.getByRole('button', { name: 'Read the example paper' }).click();
     await expect(reader.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
     await expect(reader.getByRole('alert')).toHaveCount(0);
+    await reader.getByRole('button', { name: 'Reading options' }).click();
     await reader.getByRole('button', { name: 'Chrome panel' }).click();
     await expect
       .poll(async () =>

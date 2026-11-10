@@ -21,7 +21,11 @@ function readTheme(): Theme {
 // Set the palette before React mounts, including in the packaged side panel.
 document.documentElement.dataset.theme = readTheme();
 
-export function ThemeToggle(): React.JSX.Element {
+export function ThemeToggle({
+  compact = false,
+}: {
+  compact?: boolean;
+}): React.JSX.Element {
   const [theme, setTheme] = useState<Theme>(readTheme);
 
   useEffect(() => {
@@ -48,7 +52,7 @@ export function ThemeToggle(): React.JSX.Element {
   const label = `Switch to ${nextTheme} mode`;
   return (
     <button
-      className="theme-toggle"
+      className={'theme-toggle' + (compact ? ' theme-toggle-compact' : '')}
       aria-label={label}
       title={label}
       onClick={() => {
@@ -65,7 +69,7 @@ export function ThemeToggle(): React.JSX.Element {
       ) : (
         <Moon size={15} aria-hidden="true" />
       )}
-      <span>{nextTheme === 'dark' ? 'Dark' : 'Light'}</span>
+      {!compact && <span>{nextTheme === 'dark' ? 'Dark' : 'Light'}</span>}
     </button>
   );
 }

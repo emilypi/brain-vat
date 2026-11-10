@@ -4,17 +4,17 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  Brain,
-  Check,
-  ChevronRight,
   ExternalLink,
   FileText,
+  Library,
   Highlighter,
   Link,
   PanelRight,
   Plus,
   RotateCw,
   Scan,
+  Settings2,
+  Users,
   Trash2,
   X,
   ZoomIn,
@@ -85,10 +85,20 @@ export function ReaderApp({
   const [url, setUrl] = useState(() => {
     return new URLSearchParams(location.search).get('source') ?? '';
   });
-  const [showPanel, setShowPanel] = useState(true);
+  const [showPanel, setShowPanel] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryQuery, setLibraryQuery] = useState('');
+  const [showSources, setShowSources] = useState(true);
+  const libraryToggle = useRef<HTMLButtonElement>(null);
+  const librarySearch = useRef<HTMLInputElement>(null);
+  const companionToggle = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const pdf = usePdf(paper);
   const openGeneration = useRef(0);
+
+  useEffect(() => {
+    if (showLibrary) librarySearch.current?.focus();
+  }, [showLibrary]);
 
   const report = useCallback((reason: unknown): void => {
     setError(reason instanceof Error ? reason.message : 'Something went wrong.');
@@ -114,6 +124,7 @@ export function ReaderApp({
       setPageIndex(0);
       setRotation(0);
       setRegionMode(false);
+      setShowLibrary(false);
       setSessionId(nextSession);
       const target = new URL(location.href);
       target.hash = 'doc=' + next.id;
@@ -150,6 +161,7 @@ export function ReaderApp({
       });
       setPageIndex(0);
       setRotation(0);
+      setShowLibrary(false);
       setSessionId(nextSession);
       const target = new URL(location.href);
       target.hash = 'room=' + next.id;
@@ -394,20 +406,74 @@ export function ReaderApp({
           });
         }}
       />
-      <nav className="library-sidebar" aria-label="Library">
-        <a
-          className="brand"
-          href="#"
-          onClick={(event) => {
-            event.preventDefault();
-            setShowImport(true);
-          }}
+      <nav className="reader-rail" aria-label="Reader tools">
+        <button
+          ref={libraryToggle}
+          className="icon-button"
+          aria-label="Library"
+          title="Library"
+          aria-expanded={showLibrary}
+          aria-controls="reader-library"
+          onClick={() => setShowLibrary(!showLibrary)}
         >
-          <span className="brand-mark">
-            <Brain size={19} />
-          </span>
-          brain vat<span> / </span>
-        </a>
+          <Library size={19} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Open a paper"
+          title="Open a paper"
+          disabled={busy}
+          onClick={() => setShowImport(true)}
+        >
+          <Plus size={18} />
+        </button>
+        <div className="rail-bottom">
+          <button
+            className="icon-button"
+            aria-label="Workspace"
+            title="Workspace"
+            onClick={() => setShowWorkspace(true)}
+          >
+            <Users size={18} />
+          </button>
+          <ThemeToggle compact />
+        </div>
+      </nav>
+      {showLibrary && (
+        <button
+          className="library-dismiss"
+          aria-label="Close library"
+          onClick={() => {
+            setShowLibrary(false);
+            libraryToggle.current?.focus();
+          }}
+        />
+      )}
+      <nav
+        id="reader-library"
+        className="library-sidebar"
+        aria-label="Library"
+        hidden={!showLibrary}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setShowLibrary(false);
+            libraryToggle.current?.focus();
+          }
+        }}
+      >
+        <div className="library-heading">
+          <h2>Library</h2>
+          <button
+            className="icon-button"
+            aria-label="Collapse library"
+            onClick={() => {
+              setShowLibrary(false);
+              libraryToggle.current?.focus();
+            }}
+          >
+            <X size={17} />
+          </button>
+        </div>
         <div className="workspace-label">
           <span className="avatar">{service.session?.account.username[0] ?? 'B'}</span>
           {service.session?.account.username ?? 'My reading space'}
@@ -426,22 +492,39 @@ export function ReaderApp({
           {library.length === 0 && (
             <p className="muted small">A home for your next idea.</p>
           )}
-          {library.map((item) => (
-            <button
-              className={'library-paper' + (item.id === paper?.id ? ' active' : '')}
-              key={item.id}
-              onClick={() => {
-                void openPaper(item).catch(report);
-              }}
-              disabled={busy}
-            >
-              <FileText size={16} />
-              <span>
-                {item.title}
-                <small>{item.pageCount || '—'} pages · PDF</small>
-              </span>
-            </button>
-          ))}
+          <input
+            ref={librarySearch}
+            className="library-search"
+            type="search"
+            aria-label="Find a paper"
+            placeholder="Find a paper…"
+            value={libraryQuery}
+            onChange={(event) => setLibraryQuery(event.target.value)}
+          />
+          {library.length > 0 &&
+            !library.some((item) =>
+              item.title.toLowerCase().includes(libraryQuery.toLowerCase()),
+            ) && <p className="muted small">No papers match your search.</p>}
+          {library
+            .filter((item) =>
+              item.title.toLowerCase().includes(libraryQuery.toLowerCase()),
+            )
+            .map((item) => (
+              <button
+                className={'library-paper' + (item.id === paper?.id ? ' active' : '')}
+                key={item.id}
+                onClick={() => {
+                  void openPaper(item).catch(report);
+                }}
+                disabled={busy}
+              >
+                <FileText size={16} />
+                <span>
+                  {item.title}
+                  <small>{item.pageCount || '—'} pages · PDF</small>
+                </span>
+              </button>
+            ))}
         </div>
         {paper && (
           <div className="library-section saved-section">
@@ -453,7 +536,12 @@ export function ReaderApp({
             )}
             {visibleHighlights.map((highlight) => (
               <div className="saved-item" key={highlight.id}>
-                <button onClick={() => setPageIndex(highlight.anchor.pageIndex)}>
+                <button
+                  onClick={() => {
+                    setPageIndex(highlight.anchor.pageIndex);
+                    setShowLibrary(false);
+                  }}
+                >
                   <span className="highlight-dot" />
                   <span>
                     {highlight.anchor.quote || 'Equation or figure region'}
@@ -491,6 +579,14 @@ export function ReaderApp({
             ))}
           </div>
         )}
+        {room.connection && (
+          <RoomInspector
+            key={roomId + service.client.token!}
+            room={room.connection}
+            pageIndex={pageIndex}
+            onLeave={closeRoom}
+          />
+        )}
         <div className="library-footer">
           <span className="status-dot" />
           {roomId ? 'Shared reading room' : 'Saved on this device'}
@@ -500,51 +596,6 @@ export function ReaderApp({
         </div>
       </nav>
       <main className="reading-area">
-        <header className="document-header">
-          <div className="breadcrumb">
-            Library <ChevronRight size={13} />
-            <span>{paper ? 'Reading room' : 'Welcome'}</span>
-          </div>
-          <div className="header-actions">
-            <button className="text-button" onClick={() => setShowWorkspace(true)}>
-              Workspace
-            </button>
-            <ThemeToggle />
-            {paper?.sourceUrl && (
-              <a
-                href={paper.sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                title="Open original"
-              >
-                <ExternalLink size={16} />
-                <span>Original</span>
-              </a>
-            )}
-            {environment.nativePanel && (
-              <button
-                className="text-button"
-                onClick={() => {
-                  void environment
-                    .openPanel()
-                    .then(() => setShowPanel(false))
-                    .catch(report);
-                }}
-                disabled={!pdf.document}
-              >
-                <PanelRight size={16} /> Chrome panel
-              </button>
-            )}
-            <button
-              className="icon-button"
-              aria-label="Toggle reading companion"
-              aria-pressed={showPanel}
-              onClick={() => setShowPanel(!showPanel)}
-            >
-              <PanelRight size={17} />
-            </button>
-          </div>
-        </header>
         {(error || pdf.error || room.error) && (
           <div className="error-banner" role="alert">
             <span>{error || pdf.error || room.error}</span>
@@ -561,102 +612,7 @@ export function ReaderApp({
         )}
         {paper ? (
           <>
-            <div className="paper-heading">
-              <div className="eyebrow">
-                {paper.sourceUrl ? 'RESEARCH PAPER' : 'YOUR PDF'}
-              </div>
-              <h1>{paper.title}</h1>
-              <div className="paper-meta">
-                <span>PDF</span>
-                {pageCount ? `${pageCount} pages` : 'Opening paper…'}
-                <span className="meta-separator">·</span>
-                <Check size={13} /> {roomId ? 'Shared room' : 'Stored locally'}
-              </div>
-            </div>
-            {room.connection && (
-              <RoomInspector
-                key={roomId + service.client.token!}
-                room={room.connection}
-                pageIndex={pageIndex}
-                onLeave={closeRoom}
-              />
-            )}
-            <div className="reader-toolbar" aria-label="PDF controls">
-              <button
-                className={'region-button' + (enhanced ? ' active' : '')}
-                aria-pressed={enhanced}
-                onClick={() => setEnhanced(!enhanced)}
-              >
-                Enhanced reading
-              </button>
-              <div className="toolbar-group">
-                <button
-                  className="icon-button"
-                  aria-label="Previous page"
-                  disabled={pageIndex === 0}
-                  onClick={() => setPageIndex(pageIndex - 1)}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <label className="page-number">
-                  <span className="sr-only">Page number</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={pageCount || 1}
-                    value={pageIndex + 1}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (Number.isInteger(value) && value > 0 && value <= pageCount) {
-                        setPageIndex(value - 1);
-                      }
-                    }}
-                  />
-                  <span>/ {pageCount || '—'}</span>
-                </label>
-                <button
-                  className="icon-button"
-                  aria-label="Next page"
-                  disabled={pageIndex + 1 >= pageCount}
-                  onClick={() => setPageIndex(pageIndex + 1)}
-                >
-                  <ArrowRight size={16} />
-                </button>
-              </div>
-              <div className="toolbar-group zoom-controls">
-                <button
-                  className="icon-button"
-                  aria-label="Zoom out"
-                  disabled={scale <= 0.55}
-                  onClick={() => setScale(scale - 0.15)}
-                >
-                  <ZoomOut size={16} />
-                </button>
-                <span className="zoom-value">{Math.round(scale * 100)}%</span>
-                <button
-                  className="icon-button"
-                  aria-label="Zoom in"
-                  disabled={scale >= 2}
-                  onClick={() => setScale(scale + 0.15)}
-                >
-                  <ZoomIn size={16} />
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="Rotate page"
-                  onClick={() => setRotation((rotation + 90) % 360)}
-                >
-                  <RotateCw size={15} />
-                </button>
-              </div>
-              <button
-                className={'region-button' + (regionMode ? ' active' : '')}
-                aria-pressed={regionMode}
-                onClick={() => setRegionMode(!regionMode)}
-              >
-                <Scan size={15} /> Region
-              </button>
-            </div>
+            <h1 className="sr-only">{paper.title}</h1>
             <div className="page-stage">
               {enhanced ? (
                 <EnhancedReader
@@ -675,6 +631,7 @@ export function ReaderApp({
                   documentId={paper.id}
                   pageIndex={pageIndex}
                   scale={scale}
+                  showSources={showSources}
                   rotation={rotation}
                   regionMode={regionMode}
                   highlights={visibleHighlights}
@@ -689,13 +646,177 @@ export function ReaderApp({
                 <div className="empty-stage">Opening your paper…</div>
               )}
             </div>
-            <footer className="reader-footer">
-              <Highlighter size={13} />
-              {regionMode
-                ? 'Drag a rectangle around an equation or figure.'
-                : 'Select a passage to keep it or explore its context.'}
-              <span>{enhanced ? 'Enhanced reading' : 'Original PDF'}</span>
-            </footer>
+            <div className="reader-bottom">
+              {selection && !showPanel && (
+                <div className="selection-shortcuts" aria-label="Selection actions">
+                  <button className="text-button" onClick={saveSelection}>
+                    <Highlighter size={15} /> Save highlight
+                  </button>
+                  <button className="text-button" onClick={() => setShowPanel(true)}>
+                    Ask about selection <ArrowRight size={15} />
+                  </button>
+                </div>
+              )}
+              {regionMode && (
+                <p className="region-hint">
+                  Drag around an equation or figure.
+                  <button onClick={() => setRegionMode(false)}>Done</button>
+                </p>
+              )}
+              {notice && !showPanel && (
+                <p className="quiet-notice" role="status">
+                  {notice}
+                </p>
+              )}
+              <div className="reader-toolbar" aria-label="PDF controls">
+                <div className="toolbar-group">
+                  <button
+                    className="icon-button"
+                    aria-label="Previous page"
+                    disabled={pageIndex === 0}
+                    onClick={() => setPageIndex(pageIndex - 1)}
+                  >
+                    <ArrowLeft size={16} />
+                  </button>
+                  <label className="page-number">
+                    <span className="sr-only">Page number</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={pageCount || 1}
+                      value={pageIndex + 1}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (
+                          Number.isInteger(value) &&
+                          value > 0 &&
+                          value <= pageCount
+                        ) {
+                          setPageIndex(value - 1);
+                        }
+                      }}
+                    />
+                    <span>/ {pageCount || '—'}</span>
+                  </label>
+                  <button
+                    className="icon-button"
+                    aria-label="Next page"
+                    disabled={pageIndex + 1 >= pageCount}
+                    onClick={() => setPageIndex(pageIndex + 1)}
+                  >
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+                <button
+                  className="icon-button"
+                  aria-label="Reading options"
+                  title="Reading options"
+                  popoverTarget="reading-options"
+                >
+                  <Settings2 size={17} />
+                </button>
+                <button
+                  ref={companionToggle}
+                  className="companion-toggle"
+                  aria-label="Toggle reading companion"
+                  aria-expanded={showPanel}
+                  aria-controls="reading-companion"
+                  onClick={() => setShowPanel(!showPanel)}
+                >
+                  <PanelRight size={17} /> <span>Ask</span>
+                </button>
+              </div>
+              <div id="reading-options" className="reading-options" popover="auto">
+                <h2>Reading options</h2>
+                <div className="toolbar-group zoom-controls">
+                  <button
+                    className="icon-button"
+                    aria-label="Zoom out"
+                    disabled={scale <= 0.55}
+                    onClick={() => setScale(scale - 0.15)}
+                  >
+                    <ZoomOut size={16} />
+                  </button>
+                  <button
+                    className="zoom-value"
+                    aria-label="Reset zoom to fit"
+                    title="Reset zoom to fit"
+                    onClick={() => setScale(1.05)}
+                  >
+                    {Math.round((scale / 1.05) * 100)}%
+                  </button>
+                  <button
+                    className="icon-button"
+                    aria-label="Zoom in"
+                    disabled={scale >= 2}
+                    onClick={() => setScale(scale + 0.15)}
+                  >
+                    <ZoomIn size={16} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    aria-label="Rotate page"
+                    onClick={() => setRotation((rotation + 90) % 360)}
+                  >
+                    <RotateCw size={15} />
+                  </button>
+                </div>
+                <button
+                  className={'region-button' + (regionMode ? ' active' : '')}
+                  aria-pressed={regionMode}
+                  onClick={(event) => {
+                    setRegionMode(!regionMode);
+                    event.currentTarget
+                      .closest<HTMLElement>('[popover]')
+                      ?.hidePopover();
+                  }}
+                >
+                  <Scan size={15} /> Region
+                </button>
+                <button
+                  className={'region-button' + (enhanced ? ' active' : '')}
+                  aria-pressed={enhanced}
+                  onClick={(event) => {
+                    setEnhanced(!enhanced);
+                    event.currentTarget
+                      .closest<HTMLElement>('[popover]')
+                      ?.hidePopover();
+                  }}
+                >
+                  Enhanced reading
+                </button>
+                <button
+                  className="region-button"
+                  aria-pressed={showSources}
+                  onClick={() => setShowSources(!showSources)}
+                >
+                  <Link size={15} />
+                  {showSources ? 'Hide source links' : 'Show source links'}
+                </button>
+                {paper.sourceUrl && (
+                  <a href={paper.sourceUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={15} /> Open original
+                  </a>
+                )}
+                {environment.nativePanel && (
+                  <button
+                    className="region-button"
+                    onClick={(event) => {
+                      event.currentTarget
+                        .closest<HTMLElement>('[popover]')
+                        ?.hidePopover();
+                      void environment
+                        .openPanel()
+                        .then(() => setShowPanel(false))
+                        .catch(report);
+                    }}
+                    disabled={!pdf.document}
+                  >
+                    <PanelRight size={16} /> Chrome panel
+                  </button>
+                )}
+              </div>
+            </div>
           </>
         ) : (
           <div className="welcome">
@@ -736,7 +857,28 @@ export function ReaderApp({
           </div>
         )}
       </main>
-      {showPanel && (
+      <div
+        id="reading-companion"
+        className="companion-drawer"
+        hidden={!showPanel}
+        onKeyDown={(event) => {
+          if (event.target instanceof Element && event.target.closest('dialog')) return;
+          if (event.key === 'Escape' && !event.defaultPrevented) {
+            setShowPanel(false);
+            companionToggle.current?.focus();
+          }
+        }}
+      >
+        <button
+          className="icon-button companion-close"
+          aria-label="Close reading companion"
+          onClick={() => {
+            setShowPanel(false);
+            companionToggle.current?.focus();
+          }}
+        >
+          <X size={18} />
+        </button>
         <AssistantPanel
           key={sessionId}
           room={room.connection}
@@ -756,7 +898,7 @@ export function ReaderApp({
           onSave={saveSelection}
           notice={notice}
         />
-      )}
+      </div>
       {showWorkspace && (
         <WorkspacePanel
           service={service}

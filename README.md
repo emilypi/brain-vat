@@ -18,10 +18,18 @@ PDF, or open an arXiv/public PDF link. The local reader needs no account. It sav
 local papers and highlights in that browser. URL imports require the site's CORS
 permission; otherwise download the PDF and upload it, or use the extension.
 
-Select text or use **Region** for an equation or figure. Saved highlights follow
-zoom and rotation. Source overlays open safe links and preview reference metadata.
-**Enhanced reading** toggles between the PDF and a readable text/guide view.
-Extracted text may lose mathematical layout; citations return to the original page.
+The design principle is a lightweight overlay that enhances legibility at all times.
+The paper opens without a title banner; the library and companion start collapsed.
+Use **Library** in the slim left rail to find papers, highlights and room notes.
+The bottom dock holds page navigation, **Reading options**, and **Ask**. Closing the
+companion preserves an unfinished question. The rail's theme toggle switches between
+bright cream and neutral charcoal, and remembers the choice.
+
+Select text to save a highlight or ask about it. **Reading options** contains zoom,
+rotation, **Region** capture, source visibility and **Enhanced reading**. PDFs fit
+the available width by default; saved highlights follow zoom and rotation. Source
+overlays preview reference metadata. Enhanced reading provides a text/guide view;
+extracted text may lose mathematical layout, so citations return to the PDF.
 
 ## Use Astra and shared rooms
 
@@ -34,8 +42,8 @@ Extracted text may lose mathematical layout; citations return to the original pa
 4. Ask a question, select **Expand definition**, or generate a reading guide.
    Region questions attach a rendered PNG crop. These are user-supplied images;
    they are not independently verified against the stored PDF.
-5. Expand **Shared room** to edit shared notes, opt into page presence, or create an
-   invite link. Invitees open it in a browser; the extension is optional.
+5. Open **Library**, then expand **Shared room** to edit shared notes, opt into page
+   presence, or create an invite link. Invitees can join without the extension.
 
 Everyone in a room shares highlights, notes, discussion, and AI conversations.
 Invites expire after 24 hours and can be used once. Owners can revoke invitations,
@@ -67,7 +75,7 @@ pnpm build:extension
 
 1. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
 2. Select `.output/chrome-mv3`, pin Brain Vat, and click it on a paper page.
-3. Use **Chrome panel** to move the companion into Chrome's native side panel.
+3. Under **Reading options**, use **Chrome panel** to open the native side panel.
 4. In **Workspace**, set the same server origin as the web app and sign in.
    Add the extension's exact `chrome-extension://ID` origin to the server's
    `ALLOWED_ORIGINS`. Chrome asks for access to that server when you connect.

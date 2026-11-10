@@ -230,18 +230,6 @@
 .pdf-source > button:hover {
   background: #56816633;
 }
-.source-toggle {
-  position: absolute;
-  z-index: 5;
-  right: 7px;
-  top: 7px;
-  border: 1px solid var(--line);
-  background: var(--surface, #fcfcf9);
-  color: var(--muted);
-  font-size: 8px;
-  border-radius: 3px;
-  padding: 4px 6px;
-}
 .source-preview {
   position: absolute;
   z-index: 6;

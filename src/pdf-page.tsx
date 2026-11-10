@@ -12,6 +12,7 @@ interface PdfPageProps {
   documentId: string;
   pageIndex: number;
   scale: number;
+  showSources?: boolean;
   rotation: number;
   regionMode: boolean;
   highlights: Highlight[];
@@ -74,6 +75,7 @@ export function PdfPage({
   documentId,
   pageIndex,
   scale,
+  showSources = true,
   rotation,
   regionMode,
   highlights,
@@ -90,8 +92,18 @@ export function PdfPage({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragEnd, setDragEnd] = useState<Point | null>(null);
   const [sourceLinks, setSourceLinks] = useState<SourceOverlay[]>([]);
-  const [showSources, setShowSources] = useState(true);
   const [preview, setPreview] = useState<string | null>(null);
+  const [availableWidth, setAvailableWidth] = useState(0);
+
+  useEffect(() => {
+    const stage = surface.current?.parentElement;
+    if (!stage) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setAvailableWidth(entry.contentRect.width);
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,13 +114,16 @@ export function PdfPage({
     setError(null);
     setSourceLinks([]);
     setPreview(null);
+    if (availableWidth <= 0) return;
     void (async () => {
       page = await document.getPage(pageIndex + 1);
       if (cancelled || !canvas.current || !textContainer.current) return;
-      const viewport = page.getViewport({
-        scale,
-        rotation: (page.rotate + rotation) % 360,
-      });
+      const pageRotation = (page.rotate + rotation) % 360;
+      const original = page.getViewport({ scale: 1, rotation: pageRotation });
+      // Fit the default view, then apply the user's zoom relative to that fit.
+      const fittedScale = Math.min(840, availableWidth) / original.width;
+      const renderScale = fittedScale * (scale / 1.05);
+      const viewport = page.getViewport({ scale: renderScale, rotation: pageRotation });
       const transform = viewport.transform as unknown as Transform;
       const box = page.view as unknown as PageBox;
       setGeometry({
@@ -123,8 +138,11 @@ export function PdfPage({
       canvas.current.style.width = viewport.width + 'px';
       canvas.current.style.height = viewport.height + 'px';
       textContainer.current.replaceChildren();
-      textContainer.current.style.setProperty('--total-scale-factor', String(scale));
-      textContainer.current.style.setProperty('--scale-factor', String(scale));
+      textContainer.current.style.setProperty(
+        '--total-scale-factor',
+        String(renderScale),
+      );
+      textContainer.current.style.setProperty('--scale-factor', String(renderScale));
       renderTask = page.render({
         canvas: canvas.current,
         viewport,
@@ -215,7 +233,7 @@ export function PdfPage({
       renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [document, pageIndex, scale, rotation]);
+  }, [document, pageIndex, scale, rotation, availableWidth]);
 
   const captureText = (): void => {
     if (regionMode || !geometry || !surface.current || !ready) return;
@@ -304,13 +322,6 @@ export function PdfPage({
       <div ref={textContainer} className="textLayer" />
       {ready && sourceLinks.length > 0 && !regionMode && (
         <>
-          <button
-            className="source-toggle"
-            aria-pressed={showSources}
-            onClick={() => setShowSources(!showSources)}
-          >
-            {showSources ? 'Hide source links' : 'Show source links'}
-          </button>
           {showSources && (
             <div className="pdf-source-layer" aria-label="Paper sources">
               {sourceLinks.map((link) => {

@@ -9,6 +9,7 @@ async function upload(page: Page, buffer: Buffer): Promise<void> {
     mimeType: 'application/pdf',
     buffer,
   });
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
 }
 
 test('cropped and rotated PDF anchors retain their source links', async ({ page }) => {
@@ -32,6 +33,7 @@ test('cropped and rotated PDF anchors retain their source links', async ({ page 
   const mark = page.getByTestId('saved-highlight').first();
   const saved = await mark.boundingBox();
   expect(saved?.height).toBeCloseTo(initial.height, 0);
+  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(surface).toHaveAttribute('data-ready', 'true');
   const zoomed = await mark.boundingBox();
@@ -48,6 +50,7 @@ test('cropped and rotated PDF anchors retain their source links', async ({ page 
   await expect(
     page.getByRole('tooltip').filter({ hasText: 'content not retrieved' }),
   ).toBeVisible();
+  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Hide source links' }).click();
   await expect(page.locator('.pdf-source')).toHaveCount(0);
   await expect(title).toBeVisible();
@@ -59,6 +62,7 @@ test('image-only PDFs retain region capture without inventing selectable text', 
   await upload(page, makePdfFixture({ imageOnly: true }));
   await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
   await expect(page.locator('.textLayer span')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Region', exact: true }).click();
   const region = await page.getByTestId('region-layer').boundingBox();
   if (!region) throw new Error('Missing region surface.');
@@ -70,6 +74,7 @@ test('image-only PDFs retain region capture without inventing selectable text', 
   await expect(page.getByRole('status')).toContainText('Highlight saved');
   await page.reload();
   await expect(page.getByTestId('saved-highlight')).toBeVisible();
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
   await page.getByRole('textbox', { name: 'Search this paper' }).fill('visible figure');
   await page.getByRole('button', { name: 'Find supporting passages' }).click();
   await expect(
