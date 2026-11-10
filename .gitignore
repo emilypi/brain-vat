@@ -19,3 +19,8 @@ FOCUS.md
 .env.*
 !.env.example
 .DS_Store
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.backup

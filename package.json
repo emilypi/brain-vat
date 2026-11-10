@@ -1,6 +1,6 @@
 {
   "name": "brain-vat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.13.1",
@@ -15,6 +15,11 @@
   "scripts": {
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "dev": "pnpm prepare:assets && vite --host 127.0.0.1",
+    "dev:server": "tsx watch --env-file-if-exists=.env server/main.ts",
+    "dev:all": "concurrently -k 'pnpm dev' 'pnpm dev:server'",
+    "start": "tsx --env-file-if-exists=.env server/main.ts",
+    "backup": "tsx --env-file-if-exists=.env server/backup.ts",
+    "package:extension": "pnpm build:extension && node scripts/package-extension.mjs",
     "dev:extension": "pnpm prepare:assets && wxt",
     "build:web": "pnpm prepare:assets && vite build",
     "build:extension": "pnpm prepare:assets && wxt build",
@@ -27,11 +32,17 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test"
   },
   "dependencies": {
+    "@fastify/cors": "11.4.1",
+    "@fastify/rate-limit": "11.2.2",
+    "@fastify/static": "10.1.10",
+    "fastify": "5.12.8",
     "idb": "8.0.4",
     "lucide-react": "1.70.0",
     "pdfjs-dist": "6.5.438",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "tsx": "4.23.15",
+    "yjs": "13.6.33",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -43,6 +54,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "@wxt-dev/module-react": "1.2.2",
+    "concurrently": "10.0.7",
     "eslint": "10.14.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react-hooks": "7.1.1",
