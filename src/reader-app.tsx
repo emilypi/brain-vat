@@ -22,6 +22,12 @@ import {
 } from 'lucide-react';
 import { AssistantPanel } from './assistant-panel';
 import { ThemeToggle } from './theme-toggle';
+import { EnhancedReader } from './enhanced-reader';
+import { useRoom, useService } from './workspace-client';
+import type { WorkspaceClient } from './workspace-client';
+import { RoomInspector, WorkspacePanel } from './workspace-panel';
+import type { RoomState, RoomSummary, SharedHighlight } from './workspace-contract';
+import './workspace.css';
 import { WEB_ENVIRONMENT } from './bridge';
 import type { ReaderEnvironment } from './bridge';
 import {
@@ -29,6 +35,7 @@ import {
   EXAMPLE_HASH,
   EXAMPLE_URL,
   MAX_PDF_BYTES,
+  identifyPdf,
   parsePaperUrl,
 } from './document';
 import type { Anchor, Highlight, Paper } from './document';
@@ -52,7 +59,18 @@ export function ReaderApp({
   environment = WEB_ENVIRONMENT,
 }: ReaderAppProps): React.JSX.Element {
   const [library, setLibrary] = useState<Paper[]>([]);
-  const [paper, setPaper] = useState<Paper | null>(null);
+  const [storedPaper, setPaper] = useState<Paper | null>(null);
+  const service = useService();
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [loadedRoomClient, setLoadedRoomClient] = useState<WorkspaceClient | null>(
+    null,
+  );
+  const paper = roomId && loadedRoomClient !== service.client ? null : storedPaper;
+  const room = useRoom(service.client, roomId);
+  const [showWorkspace, setShowWorkspace] = useState(() =>
+    new URLSearchParams(location.hash.slice(1)).has('invite'),
+  );
+  const [enhanced, setEnhanced] = useState(false);
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
   const [pageIndex, setPageIndex] = useState(0);
   const [scale, setScale] = useState(1.05);
@@ -80,6 +98,10 @@ export function ReaderApp({
     async (next: Paper): Promise<void> => {
       const generation = ++openGeneration.current;
       setError('');
+      setPaper(null);
+      setSelection(null);
+      setHighlights([]);
+      setRoomId(null);
       const saved = await listHighlights(next.id);
       if (generation !== openGeneration.current) return;
       const nextSession = crypto.randomUUID();
@@ -100,6 +122,71 @@ export function ReaderApp({
     [environment],
   );
 
+  const openRoom = useCallback(
+    async (next: RoomSummary): Promise<void> => {
+      const generation = ++openGeneration.current;
+      const nextSession = crypto.randomUUID();
+      setPaper(null);
+      setSelection(null);
+      setHighlights([]);
+      setError('');
+      setRoomId(next.id);
+      await environment.clear(nextSession);
+      const response = await service.client.fetch('/rooms/' + next.id + '/pdf');
+      const bytes = await response.arrayBuffer();
+      if ((await identifyPdf(bytes)) !== next.documentId) {
+        throw new Error('The downloaded PDF does not match this room.');
+      }
+      if (generation !== openGeneration.current) return;
+      setLoadedRoomClient(service.client);
+      setPaper({
+        id: next.documentId,
+        title: next.title,
+        filename: next.filename,
+        sourceUrl: next.sourceUrl,
+        bytes,
+        addedAt: next.createdAt,
+        pageCount: next.pageCount,
+      });
+      setPageIndex(0);
+      setRotation(0);
+      setSessionId(nextSession);
+      const target = new URL(location.href);
+      target.hash = 'room=' + next.id;
+      history.replaceState(null, '', target);
+    },
+    [environment, service.client],
+  );
+
+  useEffect(() => {
+    const generation = ++openGeneration.current;
+    const storedRoom = new URLSearchParams(location.hash.slice(1)).get('room');
+    if (!storedRoom) return;
+    setPaper(null);
+    setRoomId(null);
+    setSelection(null);
+    if (!service.session) {
+      void environment.clear(crypto.randomUUID()).catch(report);
+      setShowWorkspace(true);
+      return;
+    }
+    void service.client
+      .request<RoomState>('/rooms/' + storedRoom)
+      .then(async (state) => {
+        if (generation === openGeneration.current) await openRoom(state.room);
+      })
+      .catch(report);
+  }, [service.client, service.session, openRoom, environment, report]);
+
+  useEffect(() => {
+    if (!room.forbidden) return;
+    openGeneration.current += 1;
+    setPaper(null);
+    setSelection(null);
+    setHighlights([]);
+    void environment.clear(crypto.randomUUID()).catch(report);
+  }, [room.forbidden, environment, report]);
+
   useEffect(() => {
     let cancelled = false;
     void listPapers()
@@ -118,7 +205,7 @@ export function ReaderApp({
   }, [openPaper, report]);
 
   useEffect(() => {
-    if (!paper || !pdf.document) return;
+    if (!paper || !pdf.document || roomId) return;
     const next = { ...paper, pageCount: pdf.document.numPages };
     if (paper.pageCount === next.pageCount) return;
     void savePaper(next)
@@ -129,7 +216,7 @@ export function ReaderApp({
         setPaper((current) => (current?.id === next.id ? next : current));
       })
       .catch(report);
-  }, [paper, pdf.document, report]);
+  }, [paper, pdf.document, roomId, report]);
 
   useEffect(() => {
     if (!paper || !pdf.document) return;
@@ -141,9 +228,19 @@ export function ReaderApp({
         pageCount: pdf.document.numPages,
         pageIndex,
         selection,
+        roomId,
       })
       .catch(report);
-  }, [environment, paper, pdf.document, sessionId, pageIndex, selection, report]);
+  }, [
+    environment,
+    paper,
+    pdf.document,
+    sessionId,
+    pageIndex,
+    selection,
+    roomId,
+    report,
+  ]);
 
   useEffect(
     () =>
@@ -160,7 +257,7 @@ export function ReaderApp({
   );
 
   useEffect(() => {
-    if (!paper) return;
+    if (!paper || roomId) return;
     let cancelled = false;
     const refresh = (): void => {
       void listHighlights(paper.id)
@@ -177,7 +274,7 @@ export function ReaderApp({
       window.removeEventListener('focus', refresh);
       channel.close();
     };
-  }, [paper, report]);
+  }, [paper, roomId, report]);
 
   const importBytes = async (
     bytes: ArrayBuffer,
@@ -234,17 +331,51 @@ export function ReaderApp({
       note: '',
       createdAt: new Date().toISOString(),
     };
-    void saveHighlight(highlight)
+    const generation = openGeneration.current;
+    if (roomId && !room.connection) {
+      setError('Wait for the room to reconnect before saving.');
+      return;
+    }
+    const save = room.connection
+      ? room.connection.client
+          .request('/rooms/' + roomId + '/highlights', {
+            method: 'POST',
+            body: JSON.stringify({
+              id: highlight.id,
+              anchor: highlight.anchor,
+              note: highlight.note,
+            }),
+          })
+          .then(() => room.connection?.refresh())
+      : saveHighlight(highlight);
+    void save
       .then(() => {
-        setHighlights((current) => [...current, highlight]);
+        if (generation !== openGeneration.current) return;
+        if (!roomId) setHighlights((current) => [...current, highlight]);
         setSelection(null);
         window.getSelection()?.removeAllRanges();
-        setNotice('Highlight saved on this device.');
+        setNotice(
+          roomId
+            ? 'Highlight shared with the room.'
+            : 'Highlight saved on this device.',
+        );
       })
       .catch(report);
   };
 
   const pageCount = pdf.document?.numPages ?? 0;
+  const visibleHighlights = roomId
+    ? (room.connection?.state.highlights ?? [])
+    : highlights;
+  const closeRoom = (): void => {
+    openGeneration.current += 1;
+    setRoomId(null);
+    setPaper(null);
+    setSelection(null);
+    setHighlights([]);
+    history.replaceState(null, '', location.pathname);
+    void environment.clear(crypto.randomUUID()).catch(report);
+  };
   return (
     <div className={'reader-app' + (showPanel ? '' : ' panel-hidden')}>
       <input
@@ -278,7 +409,8 @@ export function ReaderApp({
           brain vat<span> / </span>
         </a>
         <div className="workspace-label">
-          <span className="avatar">E</span>My reading space
+          <span className="avatar">{service.session?.account.username[0] ?? 'B'}</span>
+          {service.session?.account.username ?? 'My reading space'}
         </div>
         <button
           className="new-paper"
@@ -314,12 +446,12 @@ export function ReaderApp({
         {paper && (
           <div className="library-section saved-section">
             <div className="section-label">
-              HIGHLIGHTS <span>{highlights.length}</span>
+              HIGHLIGHTS <span>{visibleHighlights.length}</span>
             </div>
-            {highlights.length === 0 && (
+            {visibleHighlights.length === 0 && (
               <p className="muted small">Keep the passages you want to come back to.</p>
             )}
-            {highlights.map((highlight) => (
+            {visibleHighlights.map((highlight) => (
               <div className="saved-item" key={highlight.id}>
                 <button onClick={() => setPageIndex(highlight.anchor.pageIndex)}>
                   <span className="highlight-dot" />
@@ -332,8 +464,20 @@ export function ReaderApp({
                   className="delete-highlight"
                   aria-label="Delete highlight"
                   onClick={() => {
-                    void removeHighlight(highlight.id)
+                    const generation = openGeneration.current;
+                    const remove = room.connection
+                      ? room.connection.client
+                          .request('/rooms/' + roomId + '/highlights/' + highlight.id, {
+                            method: 'DELETE',
+                            body: JSON.stringify({
+                              version: (highlight as SharedHighlight).version,
+                            }),
+                          })
+                          .then(() => room.connection?.refresh())
+                      : removeHighlight(highlight.id);
+                    void remove
                       .then(() => {
+                        if (generation !== openGeneration.current) return;
                         setHighlights((items) =>
                           items.filter((h) => h.id !== highlight.id),
                         );
@@ -349,7 +493,10 @@ export function ReaderApp({
         )}
         <div className="library-footer">
           <span className="status-dot" />
-          Saved on this device<small>Your private, local prototype</small>
+          {roomId ? 'Shared reading room' : 'Saved on this device'}
+          <small>
+            {roomId ? 'Changes sync with invited readers' : 'Your local library'}
+          </small>
         </div>
       </nav>
       <main className="reading-area">
@@ -359,6 +506,9 @@ export function ReaderApp({
             <span>{paper ? 'Reading room' : 'Welcome'}</span>
           </div>
           <div className="header-actions">
+            <button className="text-button" onClick={() => setShowWorkspace(true)}>
+              Workspace
+            </button>
             <ThemeToggle />
             {paper?.sourceUrl && (
               <a
@@ -395,9 +545,9 @@ export function ReaderApp({
             </button>
           </div>
         </header>
-        {(error || pdf.error) && (
+        {(error || pdf.error || room.error) && (
           <div className="error-banner" role="alert">
-            <span>{error || pdf.error}</span>
+            <span>{error || pdf.error || room.error}</span>
             <button
               className="icon-button"
               aria-label="Dismiss error"
@@ -420,10 +570,25 @@ export function ReaderApp({
                 <span>PDF</span>
                 {pageCount ? `${pageCount} pages` : 'Opening paper…'}
                 <span className="meta-separator">·</span>
-                <Check size={13} /> Stored locally
+                <Check size={13} /> {roomId ? 'Shared room' : 'Stored locally'}
               </div>
             </div>
+            {room.connection && (
+              <RoomInspector
+                key={roomId + service.client.token!}
+                room={room.connection}
+                pageIndex={pageIndex}
+                onLeave={closeRoom}
+              />
+            )}
             <div className="reader-toolbar" aria-label="PDF controls">
+              <button
+                className={'region-button' + (enhanced ? ' active' : '')}
+                aria-pressed={enhanced}
+                onClick={() => setEnhanced(!enhanced)}
+              >
+                Enhanced reading
+              </button>
               <div className="toolbar-group">
                 <button
                   className="icon-button"
@@ -493,7 +658,17 @@ export function ReaderApp({
               </button>
             </div>
             <div className="page-stage">
-              {pdf.document ? (
+              {enhanced ? (
+                <EnhancedReader
+                  pages={pdf.pages}
+                  guide={room.connection?.state.guide ?? null}
+                  canGenerate={Boolean(room.connection)}
+                  onNavigate={(index) => {
+                    setPageIndex(index);
+                    setEnhanced(false);
+                  }}
+                />
+              ) : pdf.document ? (
                 <PdfPage
                   key={paper.id}
                   document={pdf.document}
@@ -502,8 +677,9 @@ export function ReaderApp({
                   scale={scale}
                   rotation={rotation}
                   regionMode={regionMode}
-                  highlights={highlights}
+                  highlights={visibleHighlights}
                   selection={selection}
+                  onNavigate={setPageIndex}
                   onSelect={(anchor) => {
                     setSelection(anchor);
                     setNotice('');
@@ -518,7 +694,7 @@ export function ReaderApp({
               {regionMode
                 ? 'Drag a rectangle around an equation or figure.'
                 : 'Select a passage to keep it or explore its context.'}
-              <span>Original PDF</span>
+              <span>{enhanced ? 'Enhanced reading' : 'Original PDF'}</span>
             </footer>
           </>
         ) : (
@@ -556,13 +732,15 @@ export function ReaderApp({
             >
               <Plus size={15} /> Open your own PDF
             </button>
-            <div className="welcome-footnote">LOCAL PROTOTYPE · NO ACCOUNT NEEDED</div>
+            <div className="welcome-footnote">READ LOCALLY · SHARE WHEN YOU CHOOSE</div>
           </div>
         )}
       </main>
       {showPanel && (
         <AssistantPanel
-          key={paper?.id ?? 'empty'}
+          key={sessionId}
+          room={room.connection}
+          pdfDocument={pdf.document}
           context={
             paper
               ? {
@@ -577,6 +755,17 @@ export function ReaderApp({
           onNavigate={setPageIndex}
           onSave={saveSelection}
           notice={notice}
+        />
+      )}
+      {showWorkspace && (
+        <WorkspacePanel
+          service={service}
+          paper={paper}
+          room={room.connection}
+          inviteToken={new URLSearchParams(location.hash.slice(1)).get('invite')}
+          requestOrigin={environment.requestOrigin}
+          onOpen={openRoom}
+          onClose={() => setShowWorkspace(false)}
         />
       )}
       {showImport && (

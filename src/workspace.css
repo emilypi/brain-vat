@@ -1,0 +1,132 @@
+.workspace-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--line, #deded8);
+  border-radius: 16px;
+  padding: 32px;
+  color: var(--ink, #292d2a);
+  background: var(--surface, #fff);
+  box-shadow: 0 24px 100px #0004;
+}
+.workspace-dialog::backdrop {
+  background: #0006;
+}
+.workspace-dialog h2 {
+  margin: 10px 0 20px;
+}
+.workspace-dialog form {
+  display: grid;
+  gap: 10px;
+}
+.workspace-dialog input,
+.room-inspector input:not([type='checkbox']),
+.room-notes textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #deded8);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--canvas, #f7f7f3);
+  font: inherit;
+}
+.workspace-dialog label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.workspace-dialog button {
+  margin-top: 5px;
+}
+.workspace-dialog .modal-close {
+  position: absolute;
+  right: 15px;
+  top: 15px;
+}
+.connection-settings {
+  margin-bottom: 16px;
+}
+.connection-settings summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.room-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rooms-list {
+  margin: 20px 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.publish-paper {
+  border-top: 1px solid var(--line, #deded8);
+  padding-top: 12px;
+}
+.room-inspector {
+  margin: 0 30px 12px;
+  padding: 12px 16px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #deded8);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.room-inspector summary {
+  cursor: pointer;
+  color: var(--accent, #42735b);
+}
+.room-inspector-content {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr);
+  gap: 24px;
+  margin-top: 16px;
+}
+.room-notes label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.room-notes textarea {
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.6;
+}
+.room-members ul {
+  list-style: none;
+  padding: 0;
+}
+.room-members li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+.presence-toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.room-members > button {
+  display: block;
+  margin: 8px 0;
+}
+[data-theme='dark'] .workspace-dialog,
+[data-theme='dark'] .room-inspector {
+  color: #e1e7df;
+  background: #202521;
+  border-color: #3c453f;
+}
+[data-theme='dark'] .workspace-dialog input,
+[data-theme='dark'] .room-inspector input:not([type='checkbox']),
+[data-theme='dark'] .room-notes textarea {
+  background: #171d19;
+  border-color: #3c453f;
+}
+@media (max-width: 1000px) {
+  .room-inspector-content {
+    grid-template-columns: 1fr;
+  }
+  .room-inspector {
+    margin-inline: 12px;
+  }
+}

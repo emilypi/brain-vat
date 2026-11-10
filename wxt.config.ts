@@ -12,6 +12,10 @@ export default defineConfig({
     permissions: ['storage', 'activeTab', 'sidePanel'],
     host_permissions: ['https://arxiv.org/*'],
     optional_host_permissions: ['https://*/*', 'http://*/*'],
+    content_security_policy: {
+      extension_pages:
+        "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none';",
+    },
     action: { default_title: 'Open in Brain Vat' },
   },
 });
