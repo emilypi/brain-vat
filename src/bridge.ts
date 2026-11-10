@@ -9,6 +9,7 @@ export const snapshotSchema = z.object({
   pageCount: z.number().int().positive(),
   pageIndex: z.number().int().nonnegative(),
   selection: anchorSchema.nullable(),
+  roomId: z.string().uuid().nullable().optional(),
 });
 
 export type ReaderSnapshot = z.infer<typeof snapshotSchema>;

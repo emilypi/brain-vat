@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist';
 import { pointToViewport, rectToQuad } from './document';
+import { findTextReferences, readLinkAnnotations } from './source-links';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import type { Anchor, Highlight, PageBox, Point, Transform } from './document';
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import './research.css';
 
 interface PdfPageProps {
   document: PDFDocumentProxy;
@@ -15,6 +17,49 @@ interface PdfPageProps {
   highlights: Highlight[];
   selection: Anchor | null;
   onSelect: (anchor: Anchor) => void;
+  onNavigate?: (pageIndex: number) => void;
+}
+
+interface SourceOverlay {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  label: string;
+  url: string | null;
+  pageIndex: number | null;
+}
+
+async function destinationPage(
+  pdf: PDFDocumentProxy,
+  destination: string | unknown[] | null,
+): Promise<number | null> {
+  const target: unknown =
+    typeof destination === 'string'
+      ? await pdf.getDestination(destination)
+      : destination;
+  if (!Array.isArray(target)) return null;
+  const first: unknown = target[0];
+  if (
+    typeof first === 'number' &&
+    Number.isInteger(first) &&
+    first >= 0 &&
+    first < pdf.numPages
+  )
+    return first;
+  if (
+    first &&
+    typeof first === 'object' &&
+    'num' in first &&
+    'gen' in first &&
+    typeof first.num === 'number' &&
+    typeof first.gen === 'number'
+  ) {
+    const index = await pdf.getPageIndex({ num: first.num, gen: first.gen });
+    return index >= 0 && index < pdf.numPages ? index : null;
+  }
+  return null;
 }
 
 interface Geometry {
@@ -34,6 +79,7 @@ export function PdfPage({
   highlights,
   selection,
   onSelect,
+  onNavigate,
 }: PdfPageProps): React.JSX.Element {
   const canvas = useRef<HTMLCanvasElement>(null);
   const textContainer = useRef<HTMLDivElement>(null);
@@ -43,6 +89,9 @@ export function PdfPage({
   const [error, setError] = useState<string | null>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragEnd, setDragEnd] = useState<Point | null>(null);
+  const [sourceLinks, setSourceLinks] = useState<SourceOverlay[]>([]);
+  const [showSources, setShowSources] = useState(true);
+  const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +100,8 @@ export function PdfPage({
     let page: PDFPageProxy | undefined;
     setReady(false);
     setError(null);
+    setSourceLinks([]);
+    setPreview(null);
     void (async () => {
       page = await document.getPage(pageIndex + 1);
       if (cancelled || !canvas.current || !textContainer.current) return;
@@ -89,7 +140,71 @@ export function PdfPage({
         viewport,
       });
       await textLayer.render();
-      if (!cancelled) setReady(true);
+      if (cancelled) return;
+      setReady(true);
+      const annotations: unknown[] = await page
+        .getAnnotations({ intent: 'display' })
+        .catch(() => []);
+      const links = await Promise.all(
+        readLinkAnnotations(annotations).map(async (link) => {
+          const [a, b, c, d, e, f] = transform;
+          const [left, bottom, right, top] = link.rect;
+          const x1 = a * left + c * bottom + e;
+          const y1 = b * left + d * bottom + f;
+          const x2 = a * right + c * top + e;
+          const y2 = b * right + d * top + f;
+          const target = await destinationPage(document, link.destination).catch(
+            () => null,
+          );
+          return {
+            id: link.id,
+            left: Math.min(x1, x2),
+            top: Math.min(y1, y2),
+            width: Math.abs(x2 - x1),
+            height: Math.abs(y2 - y1),
+            label: link.label,
+            url: link.url,
+            pageIndex: target,
+          };
+        }),
+      );
+      if (cancelled || !textContainer.current || !surface.current) return;
+      const bounds = surface.current.getBoundingClientRect();
+      const walker = globalThis.document.createTreeWalker(
+        textContainer.current,
+        NodeFilter.SHOW_TEXT,
+      );
+      let node = walker.nextNode();
+      while (node && links.length < 160) {
+        for (const reference of findTextReferences(node.textContent ?? '')) {
+          const range = globalThis.document.createRange();
+          range.setStart(node, reference.start);
+          range.setEnd(node, reference.end);
+          const rect = range.getBoundingClientRect();
+          const left = rect.left - bounds.left;
+          const top = rect.top - bounds.top;
+          const overlaps = links.some(
+            (link) =>
+              left < link.left + link.width &&
+              left + rect.width > link.left &&
+              top < link.top + link.height &&
+              top + rect.height > link.top,
+          );
+          if (!overlaps && rect.width > 1 && rect.height > 1)
+            links.push({
+              id: 'text-reference-' + links.length,
+              left,
+              top,
+              width: rect.width,
+              height: rect.height,
+              label: reference.label,
+              url: reference.url,
+              pageIndex: null,
+            });
+        }
+        node = walker.nextNode();
+      }
+      if (!cancelled) setSourceLinks(links);
     })().catch((reason: unknown) => {
       if (!cancelled) {
         setError(reason instanceof Error ? reason.message : 'Page rendering failed.');
@@ -187,6 +302,82 @@ export function PdfPage({
     >
       <canvas ref={canvas} aria-hidden="true" />
       <div ref={textContainer} className="textLayer" />
+      {ready && sourceLinks.length > 0 && !regionMode && (
+        <>
+          <button
+            className="source-toggle"
+            aria-pressed={showSources}
+            onClick={() => setShowSources(!showSources)}
+          >
+            {showSources ? 'Hide source links' : 'Show source links'}
+          </button>
+          {showSources && (
+            <div className="pdf-source-layer" aria-label="Paper sources">
+              {sourceLinks.map((link) => {
+                const tipId = 'source-tip-' + pageIndex + '-' + link.id;
+                const label =
+                  link.pageIndex !== null
+                    ? `This paper · page ${link.pageIndex + 1}`
+                    : 'Cited reference · metadata only';
+                return (
+                  <div
+                    className="pdf-source"
+                    key={link.id}
+                    style={{
+                      left: link.left,
+                      top: link.top,
+                      width: link.width,
+                      height: link.height,
+                    }}
+                  >
+                    {link.url ? (
+                      <a
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={link.label + ' · open cited source'}
+                        aria-describedby={tipId}
+                      />
+                    ) : (
+                      <button
+                        aria-label={link.label}
+                        aria-describedby={tipId}
+                        onClick={() => {
+                          if (link.pageIndex !== null && onNavigate)
+                            onNavigate(link.pageIndex);
+                          else setPreview(preview === link.id ? null : link.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setPreview(null);
+                        }}
+                      />
+                    )}
+                    <span
+                      id={tipId}
+                      className={
+                        'source-preview' + (preview === link.id ? ' preview-open' : '')
+                      }
+                      role="tooltip"
+                    >
+                      <strong>{label}</strong>
+                      <span>{link.label}</span>
+                      {link.url ? (
+                        <span>
+                          {new URL(link.url).hostname} · content not retrieved
+                        </span>
+                      ) : (
+                        link.pageIndex === null && (
+                          <span>Bibliography details are unresolved.</span>
+                        )
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
       {geometry && (
         <svg
           className="highlight-layer"
