@@ -31,7 +31,20 @@ the available width by default; saved highlights follow zoom and rotation. Sourc
 overlays preview reference metadata. Enhanced reading provides a text/guide view;
 extracted text may lose mathematical layout, so citations return to the PDF.
 
-## Use Astra and shared rooms
+## Ask Astra while reading solo
+
+Put `OPENAI_API_KEY=...` in `.env` and restart the server. Open a local paper and
+click **Ask**; no account or reading room is required on the local server.
+**Enter** sends the question; **Shift+Enter** adds a newline. Astra receives relevant
+paper passages, your selected passage or region, and recent conversation context.
+Answers include clickable sources. **Find passages** searches the PDF without AI.
+
+Solo conversations live in memory for this reading session. Reloading, switching
+papers, an hour of inactivity, or restarting the server ends the session. Use a
+shared room when you want a durable conversation. Failed delivery preserves the
+draft; retrying delivery uses the same request ID to avoid duplicate model calls.
+
+## Use shared rooms
 
 1. Put an OpenAI API key with Astra access in `.env` as `OPENAI_API_KEY=...`.
    Restart the server. Keep the key on the server; never use a `VITE_` secret.
@@ -63,9 +76,8 @@ private PDF passages are not included in that search request. The final synthesi
 does send relevant paper passages, selected images, and recent shared chat to the
 configured LLM API. Provider-side storage is disabled in the requests.
 
-Without a key, reading, accounts and collaboration work; AI requests show that
-configuration is missing. The integration is tested with injected provider responses.
-A live Astra response has not been verified without a configured key.
+Without a key, solo Ask offers passage search; reading, accounts and collaboration
+still work. Automated tests use injected providers and block production AI calls.
 
 ## Chrome extension
 

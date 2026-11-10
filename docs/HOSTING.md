@@ -34,6 +34,23 @@ An exclusive `server.pid` lock precedes database recovery. After a crash, verify
 the recorded process is stopped before removing the lock. Never remove a live
 server's lock. Graceful shutdown removes it automatically.
 
+## Solo AI on your computer
+
+The default loopback server enables account-free solo AI. It requires a loopback
+connection and Host, an explicitly allowed local or Chrome extension origin when
+creating a session, and a private bearer token thereafter. Forwarded requests are
+rejected. Setting `HOST=0.0.0.0` disables this mode; hosted readers use authenticated
+rooms. Do not expose a loopback server through a tunnel or a proxy that strips all
+forwarding headers and rewrites Host to localhost.
+
+Solo paper text, conversation and tokens stay in server memory and are excluded
+from SQLite backups. Sessions expire after an hour of inactivity and disappear on
+restart. Limits are eight sessions, 30 runs per session, two concurrent runs and
+100 starts per UTC day per process; restarting resets these counters. Ambiguous
+requests are never automatically resubmitted.
+
+## PDF processing
+
 The parser receives no server credentials and runs in a separate process with a
 15-second deadline and a 256 MiB V8 heap bound. This is not an OS sandbox or an
 absolute resident-memory limit. Use a dedicated least-privilege service account and

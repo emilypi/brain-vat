@@ -20,6 +20,9 @@ await writeFile(pidFile, String(process.pid), { mode: 0o600, flag: 'wx' }).catch
   );
 });
 const app = await createApp({
+  enableSolo: ['127.0.0.1', 'localhost', '::1'].includes(
+    process.env.HOST ?? '127.0.0.1',
+  ),
   dbPath,
   provider: createAstraProvider({
     model: process.env.ASTRA_MODEL ?? 'gpt-6-astra',

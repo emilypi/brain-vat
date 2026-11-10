@@ -1,7 +1,8 @@
+import { blockProductionAI } from './fixtures';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { test, expect, chromium } from '@playwright/test';
+import { test, expect, chromium } from './fixtures';
 import type { FastifyInstance } from 'fastify';
 import type { Page } from '@playwright/test';
 import { createApp } from '../../server/app';
@@ -47,6 +48,7 @@ test('the native panel isolates two reading rooms containing the same PDF', asyn
       '--load-extension=' + extensionPath,
     ],
   });
+  await blockProductionAI(context);
   const directory = await mkdtemp(join(tmpdir(), 'brain-vat-extension-'));
   let app: FastifyInstance | null = null;
   try {

@@ -14,6 +14,7 @@ import { AuthenticationBusyError, hashPassword, verifyPassword } from './auth.ts
 import { decodeBase64, extractPdf, PdfImportError } from './pdf-import.ts';
 import { createAstraProvider, ProviderError } from './provider.ts';
 import { ApiError, WorkspaceStore } from './store.ts';
+import { localRequest, registerSolo } from './solo.ts';
 
 export interface AppOptions {
   dbPath?: string;
@@ -21,6 +22,7 @@ export interface AppOptions {
   allowedOrigins?: string[];
   webRoot?: string;
   registrationOpen?: boolean;
+  enableSolo?: boolean;
 }
 
 const idSchema = z.string().uuid();
@@ -159,6 +161,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     if (!path?.startsWith('/api/')) return;
     if (
       request.method === 'OPTIONS' ||
+      path.startsWith('/api/solo/') ||
       ['/api/health', '/api/auth/register', '/api/auth/login'].includes(path ?? '')
     )
       return;
@@ -262,10 +265,18 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     abort([...jobs.keys()]);
     store.close();
   });
-  app.get('/api/health', async () => ({
+  await registerSolo(
+    app,
+    provider,
+    options.enableSolo ?? false,
+    allowedOrigins,
+    validateAnswer,
+  );
+  app.get('/api/health', async (request) => ({
     provider: provider.name,
     model: provider.model,
     configured: provider.configured,
+    soloAvailable: Boolean(options.enableSolo) && localRequest(request),
     registrationOpen: store.registrationAvailable(registrationOpen),
   }));
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };

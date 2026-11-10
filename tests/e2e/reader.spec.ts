@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 
 async function openExample(page: Page): Promise<void> {
@@ -96,7 +96,7 @@ test('evidence is labeled and sources return to the cited page', async ({ page }
   await expect(page.getByRole('spinbutton', { name: 'Page number' })).toHaveValue(
     pageNumber ?? '',
   );
-  await expect(page.getByText('No AI connected')).toBeVisible();
+  await expect(page.getByText('Passage search', { exact: true })).toBeVisible();
 });
 
 test('local upload deduplicates by bytes and rejects a mislabeled file', async ({

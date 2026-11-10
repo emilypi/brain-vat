@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 for (const width of [1440, 800, 320]) {
   test(`reading stays unobstructed at ${width}px`, async ({ page }) => {

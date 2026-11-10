@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import type { BrowserContext, Page } from '@playwright/test';
 import type { FastifyInstance } from 'fastify';
 import { createApp } from '../../server/app';
@@ -140,7 +140,10 @@ test('invited readers share notes, highlights and one AI conversation', async ({
   await page
     .getByRole('textbox', { name: 'Ask about this paper' })
     .fill('What is a semiring?');
-  await page.getByRole('button', { name: 'Send AI question' }).click();
+  await page.getByRole('textbox', { name: 'Ask about this paper' }).press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Ask about this paper' })).toHaveValue(
+    '',
+  );
   await expect(
     invited.getByText('A semiring supports addition and multiplication.'),
   ).toBeVisible();
