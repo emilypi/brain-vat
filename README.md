@@ -18,12 +18,37 @@ PDF, or open an arXiv/public PDF link. The local reader needs no account. It sav
 local papers and highlights in that browser. URL imports require the site's CORS
 permission; otherwise download the PDF and upload it, or use the extension.
 
-Select text or use **Region** for an equation or figure. Saved highlights follow
-zoom and rotation. Source overlays open safe links and preview reference metadata.
-**Enhanced reading** toggles between the PDF and a readable text/guide view.
-Extracted text may lose mathematical layout; citations return to the original page.
+The design principle is a lightweight overlay that enhances legibility at all times.
+The paper opens without a title banner; the library and companion start collapsed.
+Use **Library** in the slim left rail to find papers, highlights and room notes.
+Its **Contents** browser shows the PDF's embedded section hierarchy, with search
+and page links. PDFs without an embedded outline say so; headings are not inferred.
+The bottom dock holds page navigation, zoom, **Reading options**, and **Ask**. Closing the
+companion preserves an unfinished question. The rail's theme toggle switches between
+bright cream and neutral charcoal, and remembers the choice.
 
-## Use Astra and shared rooms
+Scroll continuously through the PDF; nearby pages render as you reach them. Zoom
+stays visible and preserves your reading position. Select text to save a highlight
+or ask about it. **Reading options** contains rotation, **Region** capture, source
+visibility and **Enhanced reading**. PDFs fit the available width by default;
+saved highlights follow zoom and rotation. Blue underlines mark source links,
+with reference previews on hover or keyboard focus. Enhanced reading provides a text/guide view;
+extracted text may lose mathematical layout, so citations return to the PDF.
+
+## Ask Astra while reading solo
+
+Put `OPENAI_API_KEY=...` in `.env` and restart the server. Open a local paper and
+click **Ask**; no account or reading room is required on the local server.
+**Enter** sends the question; **Shift+Enter** adds a newline. Astra receives relevant
+paper passages, your selected passage or region, and recent conversation context.
+Answers include clickable sources. **Find passages** searches the PDF without AI.
+
+Solo conversations live in memory for this reading session. Reloading, switching
+papers, an hour of inactivity, or restarting the server ends the session. Use a
+shared room when you want a durable conversation. Failed delivery preserves the
+draft; retrying delivery uses the same request ID to avoid duplicate model calls.
+
+## Use shared rooms
 
 1. Put an OpenAI API key with Astra access in `.env` as `OPENAI_API_KEY=...`.
    Restart the server. Keep the key on the server; never use a `VITE_` secret.
@@ -34,8 +59,8 @@ Extracted text may lose mathematical layout; citations return to the original pa
 4. Ask a question, select **Expand definition**, or generate a reading guide.
    Region questions attach a rendered PNG crop. These are user-supplied images;
    they are not independently verified against the stored PDF.
-5. Expand **Shared room** to edit shared notes, opt into page presence, or create an
-   invite link. Invitees open it in a browser; the extension is optional.
+5. Open **Library**, then expand **Shared room** to edit shared notes, opt into page
+   presence, or create an invite link. Invitees can join without the extension.
 
 Everyone in a room shares highlights, notes, discussion, and AI conversations.
 Invites expire after 24 hours and can be used once. Owners can revoke invitations,
@@ -55,9 +80,8 @@ private PDF passages are not included in that search request. The final synthesi
 does send relevant paper passages, selected images, and recent shared chat to the
 configured LLM API. Provider-side storage is disabled in the requests.
 
-Without a key, reading, accounts and collaboration work; AI requests show that
-configuration is missing. The integration is tested with injected provider responses.
-A live Astra response has not been verified without a configured key.
+Without a key, solo Ask offers passage search; reading, accounts and collaboration
+still work. Automated tests use injected providers and block production AI calls.
 
 ## Chrome extension
 
@@ -67,7 +91,7 @@ pnpm build:extension
 
 1. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
 2. Select `.output/chrome-mv3`, pin Brain Vat, and click it on a paper page.
-3. Use **Chrome panel** to move the companion into Chrome's native side panel.
+3. Under **Reading options**, use **Chrome panel** to open the native side panel.
 4. In **Workspace**, set the same server origin as the web app and sign in.
    Add the extension's exact `chrome-extension://ID` origin to the server's
    `ALLOWED_ORIGINS`. Chrome asks for access to that server when you connect.
@@ -112,12 +136,13 @@ pnpm test:e2e
 pnpm audit
 ```
 
-- `src/reader-app.tsx`, `src/pdf-page.tsx`: PDF reader, anchors and source overlays.
+- `src/reader-app.tsx`, `src/pdf-reader.tsx`, `src/pdf-page.tsx`: continuous PDF reader.
 - `src/assistant-panel.tsx`, `src/enhanced-reader.tsx`: shared AI and enhanced mode.
 - `src/workspace-contract.ts`, `src/workspace-client.ts`: domain contracts and client.
 - `src/workspace-panel.tsx`, `src/room-notes.tsx`: accounts, invitations and Yjs notes.
 - `server/app.ts`, `server/store.ts`: authenticated API and durable shared state.
 - `server/provider.ts`, `server/evidence.ts`: Astra and evidence validation.
+- `server/solo.ts`: local, ephemeral AI sessions without an account.
 - `server/pdf-import.ts`, `server/pdf-worker.ts`: bounded PDF extraction.
 - `extension/`: packaged reader, native panel and validated active-tab messaging.
 

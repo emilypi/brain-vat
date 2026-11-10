@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import {
   ArrowUp,
   BookOpen,
@@ -18,6 +19,7 @@ import type { AssistantContext } from './bridge';
 import type { Anchor, Evidence, PageBox, Transform } from './document';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { RoomConnection } from './workspace-client';
+import { useService, WorkspaceClient } from './workspace-client';
 import type { AiRun, RunInput, ServiceStatus } from './workspace-contract';
 import './research.css';
 
@@ -32,6 +34,21 @@ interface AssistantPanelProps {
   pdfDocument?: PDFDocumentProxy | null;
 }
 
+function submitOnEnter(
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  enabled: boolean,
+): void {
+  if (
+    event.key !== 'Enter' ||
+    event.shiftKey ||
+    event.nativeEvent.isComposing ||
+    event.keyCode === 229
+  )
+    return;
+  event.preventDefault();
+  if (enabled) event.currentTarget.form?.requestSubmit();
+}
+
 function LocalAssistantPanel({
   context,
   indexing,
@@ -39,14 +56,198 @@ function LocalAssistantPanel({
   onSave,
   notice,
   showThemeToggle = false,
+  pdfDocument,
 }: AssistantPanelProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
   const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const service = useService();
+  const [health, setHealth] = useState<ServiceStatus | null>(null);
+  const [mode, setMode] = useState<'ask' | 'search'>('ask');
+  const [runs, setRuns] = useState<AiRun[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState<RunInput | null>(null);
+  const [canceling, setCanceling] = useState<string | null>(null);
+  const solo = useRef<WorkspaceClient | null>(null);
+  const inFlight = useRef(false);
+  const generation = useRef(0);
+  const conversation = useRef<HTMLDivElement>(null);
+  const documentId = context?.documentId;
+  const aiAvailable = Boolean(health?.configured && health.soloAvailable);
+  const asking = aiAvailable && mode === 'ask';
   const selection = context?.selection;
+  const suggestions = asking
+    ? [
+        selection ? 'Explain this selection step by step.' : 'What is the main result?',
+        'Which definitions do I need to understand this paper?',
+      ]
+    : ['What does convolution mean here?', 'Where is semiring defined?'];
+
+  useEffect(() => {
+    const current = ++generation.current;
+    setHealth(null);
+    setRuns([]);
+    setError('');
+    setPending(null);
+    setBusy(false);
+    inFlight.current = false;
+    void service.client
+      .request<ServiceStatus>('/health')
+      .then((status) => {
+        if (current === generation.current) setHealth(status);
+      })
+      .catch(() => {
+        if (current === generation.current) setHealth(null);
+      });
+    return () => {
+      generation.current += 1;
+      const client = solo.current;
+      solo.current = null;
+      if (client)
+        void client
+          .request('/solo/session', { method: 'DELETE' })
+          .catch(() => undefined);
+    };
+  }, [service.client, documentId]);
+
+  const acceptRun = (run: AiRun): void => {
+    setRuns((current) => [...current.filter((item) => item.id !== run.id), run]);
+  };
+
+  useEffect(() => {
+    const running = runs.filter((run) => run.status === 'running');
+    const client = solo.current;
+    if (!client || running.length === 0) return;
+    let cancelled = false;
+    let polling = false;
+    const poll = async (): Promise<void> => {
+      if (polling) return;
+      polling = true;
+      try {
+        const updates = await Promise.all(
+          running.map((run) => client.request<AiRun>('/solo/runs/' + run.id)),
+        );
+        if (!cancelled) {
+          setRuns((current) =>
+            current.map((run) => updates.find((item) => item.id === run.id) ?? run),
+          );
+          setError('');
+        }
+      } catch (reason) {
+        if (!cancelled)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : 'Could not check the answer. Your question has not been sent again.',
+          );
+      } finally {
+        polling = false;
+      }
+    };
+    const timer = setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [runs]);
+
+  const finishedCount = runs.filter((run) => run.status !== 'running').length;
+  useEffect(() => {
+    const element = conversation.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [runs.length, finishedCount]);
+
+  const ask = async (question: string, retry?: RunInput): Promise<void> => {
+    if (!context || !aiAvailable || indexing || !question.trim() || inFlight.current) {
+      return;
+    }
+    const current = generation.current;
+    inFlight.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const image =
+        !retry && selection?.kind === 'region' && pdfDocument
+          ? await captureRegion(pdfDocument, selection)
+          : null;
+      const input =
+        retry ??
+        runInputSchema.parse({
+          requestId: crypto.randomUUID(),
+          question,
+          kind: 'question',
+          selection: selection ?? null,
+          image,
+          externalQuery: null,
+        });
+      if (current !== generation.current) return;
+      if (!solo.current) {
+        const session = await service.client.request<{ token: string }>(
+          '/solo/sessions',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              documentId: context.documentId,
+              title: context.title,
+              pages: context.pages,
+            }),
+          },
+        );
+        const client = new WorkspaceClient(service.client.baseUrl, session.token);
+        if (current !== generation.current) {
+          void client
+            .request('/solo/session', { method: 'DELETE' })
+            .catch(() => undefined);
+          return;
+        }
+        solo.current = client;
+      }
+      setPending(input);
+      const run = await solo.current.request<AiRun>('/solo/runs', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      if (current !== generation.current) return;
+      acceptRun(run);
+      setPending(null);
+      setQuery((value) => (value.trim() === question.trim() ? '' : value));
+    } catch (reason) {
+      if (current === generation.current)
+        setError(
+          reason instanceof Error ? reason.message : 'Could not send this question.',
+        );
+    } finally {
+      if (current === generation.current) {
+        setBusy(false);
+        inFlight.current = false;
+      }
+    }
+  };
+
+  const cancel = async (run: AiRun): Promise<void> => {
+    const current = generation.current;
+    setCanceling(run.id);
+    try {
+      const result = await solo.current?.request<AiRun>(
+        '/solo/runs/' + run.id + '/cancel',
+        {
+          method: 'POST',
+        },
+      );
+      if (result && current === generation.current) acceptRun(result);
+    } catch (reason) {
+      if (current === generation.current)
+        setError(
+          reason instanceof Error ? reason.message : 'Could not cancel the question.',
+        );
+    } finally {
+      if (current === generation.current) setCanceling(null);
+    }
+  };
 
   const search = (text: string): void => {
-    if (!context || !text.trim()) return;
+    if (!context || indexing || !text.trim()) return;
     setSubmitted(text);
     setEvidence(findEvidence(text, context.pages));
   };
@@ -60,14 +261,18 @@ function LocalAssistantPanel({
           </div>
           {showThemeToggle && <ThemeToggle />}
         </div>
-        <h2>A little more context.</h2>
-        <p>Follow an idea without losing your place.</p>
+        <h2>{asking ? 'Ask about this paper.' : 'Find it in the paper.'}</h2>
+        <p>
+          {asking
+            ? 'Work through an idea without losing your place.'
+            : 'Search the text and follow the evidence.'}
+        </p>
       </header>
-      <div className="panel-scroll">
+      <div className="panel-scroll" ref={conversation}>
         <div className="mode-note">
           <BookOpen size={15} />
           <span>
-            Local evidence mode <span className="muted">· No AI connected</span>
+            {aiAvailable ? `${health!.provider} · ${health!.model}` : 'Passage search'}
           </span>
         </div>
         {context ? (
@@ -98,6 +303,7 @@ function LocalAssistantPanel({
                         className="text-button"
                         disabled={indexing}
                         onClick={() => {
+                          setMode('search');
                           setQuery(selection.quote);
                           search(selection.quote);
                         }}
@@ -118,27 +324,29 @@ function LocalAssistantPanel({
                 {notice}
               </p>
             )}
-            {!submitted && (
+            {!submitted && runs.length === 0 && (
               <section className="suggestions">
                 <div className="section-label">START WITH A QUESTION</div>
-                {['What does convolution mean here?', 'Where is semiring defined?'].map(
-                  (prompt) => (
-                    <button
-                      key={prompt}
-                      disabled={indexing}
-                      onClick={() => {
-                        setQuery(prompt);
-                        search(prompt);
-                      }}
-                    >
-                      {prompt}
-                      <CornerUpRight size={15} />
-                    </button>
-                  ),
-                )}
+                {suggestions.map((prompt) => (
+                  <button
+                    key={prompt}
+                    disabled={indexing || busy || Boolean(pending)}
+                    onClick={() => {
+                      setQuery(prompt);
+                      if (asking) void ask(prompt);
+                      else search(prompt);
+                    }}
+                  >
+                    {prompt}
+                    <CornerUpRight size={15} />
+                  </button>
+                ))}
                 <p className="muted small">
-                  Search returns passages from this PDF. Generated explanations and
-                  external sources will arrive when a model is connected.
+                  {asking
+                    ? 'Questions and relevant passages go to Astra. This conversation ' +
+                      'is private to this reading session.'
+                    : 'This mode finds matching passages. AI explanations require ' +
+                      'the local Astra service or a connected reading room.'}
                 </p>
               </section>
             )}
@@ -169,6 +377,39 @@ function LocalAssistantPanel({
                 )}
               </section>
             )}
+            {error && (
+              <p className="research-error" role="alert">
+                {error}
+              </p>
+            )}
+            {busy && (
+              <p className="notice" role="status">
+                Sending to Astra…
+              </p>
+            )}
+            {pending && !busy && (
+              <div className="request-retry">
+                <p>Delivery needs confirmation. Your draft is preserved.</p>
+                <button
+                  className="text-button"
+                  onClick={() => void ask(pending.question, pending)}
+                >
+                  Retry delivery with the same request ID
+                </button>
+              </div>
+            )}
+            <section aria-label="Solo conversation" aria-live="polite">
+              {runs.map((run) => (
+                <SharedRunCard
+                  key={run.id}
+                  run={run}
+                  canceling={canceling}
+                  pageCount={context.pages.length}
+                  onNavigate={onNavigate}
+                  onCancel={(item) => void cancel(item)}
+                />
+              ))}
+            </section>
           </>
         ) : (
           <div className="panel-empty">
@@ -182,27 +423,62 @@ function LocalAssistantPanel({
         className="composer"
         onSubmit={(event) => {
           event.preventDefault();
-          search(query);
+          if (asking) void ask(query);
+          else search(query);
         }}
       >
+        {aiAvailable && (
+          <div className="composer-tabs" aria-label="Question mode">
+            <button
+              type="button"
+              aria-pressed={mode === 'ask'}
+              onClick={() => setMode('ask')}
+            >
+              <Sparkles size={13} /> Ask Astra
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === 'search'}
+              onClick={() => setMode('search')}
+            >
+              <Search size={13} /> Find passages
+            </button>
+          </div>
+        )}
         <label className="sr-only" htmlFor="question">
-          Search this paper
+          {asking ? 'Ask about this paper' : 'Search this paper'}
         </label>
         <textarea
           id="question"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Ask a question or search a term…"
+          onKeyDown={(event) =>
+            submitOnEnter(
+              event,
+              Boolean(context) &&
+                !indexing &&
+                Boolean(query.trim()) &&
+                !busy &&
+                !pending,
+            )
+          }
+          placeholder={
+            asking
+              ? 'Ask about the paper or your selection…'
+              : 'Find a term or passage…'
+          }
           disabled={!context}
           rows={2}
         />
         <div className="composer-footer">
-          <span>{indexing ? 'Indexing paper…' : 'Sources stay one click away'}</span>
+          <span>
+            {indexing ? 'Indexing paper…' : 'Enter to send · Shift+Enter for newline'}
+          </span>
           <button
             type="submit"
             className="send-button"
-            aria-label="Find supporting passages"
-            disabled={!context || indexing || !query.trim()}
+            aria-label={asking ? 'Send AI question' : 'Find supporting passages'}
+            disabled={!context || indexing || !query.trim() || busy || Boolean(pending)}
           >
             <ArrowUp size={18} />
           </button>
@@ -281,7 +557,9 @@ function SharedRunCard({
     <article className="shared-run" aria-label={run.kind + ' request'}>
       <div className="run-heading">
         <strong>{run.question}</strong>
-        <span className={'run-status status-' + run.status}>{run.status}</span>
+        <span className={'run-status status-' + run.status}>
+          {run.status === 'running' ? 'Thinking…' : run.status}
+        </span>
       </div>
       {run.error && <p className="research-error">{run.error}</p>}
       {run.status === 'uncertain' && (
@@ -380,6 +658,11 @@ function SharedAssistantPanel({
         if (generation.current !== current) return;
         setLatestRun(run);
         setPending(null);
+        if (request.input.kind === 'question') {
+          setQuery((current) =>
+            current.trim() === request.input.question.trim() ? '' : current,
+          );
+        }
         if (request.input.kind === 'definition') setDefinitionId(run.id);
         await room.refresh();
       } catch (reason) {
@@ -718,6 +1001,12 @@ function SharedAssistantPanel({
           value={query}
           maxLength={8000}
           rows={3}
+          onKeyDown={(event) =>
+            submitOnEnter(
+              event,
+              Boolean(query.trim()) && !(mode === 'ask' ? disabled : busy),
+            )
+          }
           onChange={(event) => {
             setQuery(event.target.value);
             messageId.current = null;
@@ -751,7 +1040,7 @@ function SharedAssistantPanel({
           </div>
         )}
         <div className="composer-footer">
-          <span>Shared with the room</span>
+          <span>Enter to send · Shift+Enter for newline</span>
           <button
             type="submit"
             className="send-button"

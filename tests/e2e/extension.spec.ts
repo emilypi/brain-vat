@@ -1,4 +1,5 @@
-import { test, expect, chromium } from '@playwright/test';
+import { blockProductionAI } from './fixtures';
+import { test, expect, chromium } from './fixtures';
 import { resolve } from 'node:path';
 
 test('native panel opens and rejects stale navigation', async () => {
@@ -12,6 +13,7 @@ test('native panel opens and rejects stale navigation', async () => {
       '--load-extension=' + extensionPath,
     ],
   });
+  await blockProductionAI(context);
   try {
     const worker =
       context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
@@ -19,8 +21,12 @@ test('native panel opens and rejects stale navigation', async () => {
     const reader = await context.newPage();
     await reader.goto(`chrome-extension://${extensionId}/reader.html`);
     await reader.getByRole('button', { name: 'Read the example paper' }).click();
-    await expect(reader.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+    await expect(reader.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+      'data-ready',
+      'true',
+    );
     await expect(reader.getByRole('alert')).toHaveCount(0);
+    await reader.getByRole('button', { name: 'Reading options' }).click();
     await reader.getByRole('button', { name: 'Chrome panel' }).click();
     await expect
       .poll(async () =>

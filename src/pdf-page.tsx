@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist';
+import { destinationPage } from './pdf';
 import { pointToViewport, rectToQuad } from './document';
 import { findTextReferences, readLinkAnnotations } from './source-links';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
@@ -11,7 +12,9 @@ interface PdfPageProps {
   document: PDFDocumentProxy;
   documentId: string;
   pageIndex: number;
-  scale: number;
+  width: number;
+  active: boolean;
+  showSources?: boolean;
   rotation: number;
   regionMode: boolean;
   highlights: Highlight[];
@@ -31,37 +34,6 @@ interface SourceOverlay {
   pageIndex: number | null;
 }
 
-async function destinationPage(
-  pdf: PDFDocumentProxy,
-  destination: string | unknown[] | null,
-): Promise<number | null> {
-  const target: unknown =
-    typeof destination === 'string'
-      ? await pdf.getDestination(destination)
-      : destination;
-  if (!Array.isArray(target)) return null;
-  const first: unknown = target[0];
-  if (
-    typeof first === 'number' &&
-    Number.isInteger(first) &&
-    first >= 0 &&
-    first < pdf.numPages
-  )
-    return first;
-  if (
-    first &&
-    typeof first === 'object' &&
-    'num' in first &&
-    'gen' in first &&
-    typeof first.num === 'number' &&
-    typeof first.gen === 'number'
-  ) {
-    const index = await pdf.getPageIndex({ num: first.num, gen: first.gen });
-    return index >= 0 && index < pdf.numPages ? index : null;
-  }
-  return null;
-}
-
 interface Geometry {
   width: number;
   height: number;
@@ -73,7 +45,9 @@ export function PdfPage({
   document,
   documentId,
   pageIndex,
-  scale,
+  width,
+  active,
+  showSources = true,
   rotation,
   regionMode,
   highlights,
@@ -90,7 +64,6 @@ export function PdfPage({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragEnd, setDragEnd] = useState<Point | null>(null);
   const [sourceLinks, setSourceLinks] = useState<SourceOverlay[]>([]);
-  const [showSources, setShowSources] = useState(true);
   const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
@@ -102,13 +75,14 @@ export function PdfPage({
     setError(null);
     setSourceLinks([]);
     setPreview(null);
+    if (width <= 0) return;
     void (async () => {
       page = await document.getPage(pageIndex + 1);
       if (cancelled || !canvas.current || !textContainer.current) return;
-      const viewport = page.getViewport({
-        scale,
-        rotation: (page.rotate + rotation) % 360,
-      });
+      const pageRotation = (page.rotate + rotation) % 360;
+      const original = page.getViewport({ scale: 1, rotation: pageRotation });
+      const renderScale = width / original.width;
+      const viewport = page.getViewport({ scale: renderScale, rotation: pageRotation });
       const transform = viewport.transform as unknown as Transform;
       const box = page.view as unknown as PageBox;
       setGeometry({
@@ -123,8 +97,11 @@ export function PdfPage({
       canvas.current.style.width = viewport.width + 'px';
       canvas.current.style.height = viewport.height + 'px';
       textContainer.current.replaceChildren();
-      textContainer.current.style.setProperty('--total-scale-factor', String(scale));
-      textContainer.current.style.setProperty('--scale-factor', String(scale));
+      textContainer.current.style.setProperty(
+        '--total-scale-factor',
+        String(renderScale),
+      );
+      textContainer.current.style.setProperty('--scale-factor', String(renderScale));
       renderTask = page.render({
         canvas: canvas.current,
         viewport,
@@ -215,7 +192,7 @@ export function PdfPage({
       renderTask?.cancel();
       textLayer?.cancel();
     };
-  }, [document, pageIndex, scale, rotation]);
+  }, [document, pageIndex, width, rotation]);
 
   const captureText = (): void => {
     if (regionMode || !geometry || !surface.current || !ready) return;
@@ -294,6 +271,8 @@ export function PdfPage({
       ref={surface}
       className="pdf-page"
       data-testid="pdf-page"
+      data-active={active}
+      data-page-index={pageIndex}
       data-ready={ready}
       aria-label={'Page ' + (pageIndex + 1)}
       style={{ width: geometry?.width, height: geometry?.height }}
@@ -304,13 +283,6 @@ export function PdfPage({
       <div ref={textContainer} className="textLayer" />
       {ready && sourceLinks.length > 0 && !regionMode && (
         <>
-          <button
-            className="source-toggle"
-            aria-pressed={showSources}
-            onClick={() => setShowSources(!showSources)}
-          >
-            {showSources ? 'Hide source links' : 'Show source links'}
-          </button>
           {showSources && (
             <div className="pdf-source-layer" aria-label="Paper sources">
               {sourceLinks.map((link) => {

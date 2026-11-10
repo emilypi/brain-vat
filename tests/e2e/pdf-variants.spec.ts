@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { makePdfFixture } from '../fixtures/pdf-fixtures';
 
@@ -9,11 +9,12 @@ async function upload(page: Page, buffer: Buffer): Promise<void> {
     mimeType: 'application/pdf',
     buffer,
   });
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
 }
 
 test('cropped and rotated PDF anchors retain their source links', async ({ page }) => {
   await upload(page, makePdfFixture({ cropped: true, rotated: true }));
-  const surface = page.getByTestId('pdf-page');
+  const surface = page.locator('.pdf-page[data-active="true"]');
   await expect(surface).toHaveAttribute('data-ready', 'true');
   const title = page
     .locator('.textLayer span')
@@ -48,6 +49,7 @@ test('cropped and rotated PDF anchors retain their source links', async ({ page 
   await expect(
     page.getByRole('tooltip').filter({ hasText: 'content not retrieved' }),
   ).toBeVisible();
+  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Hide source links' }).click();
   await expect(page.locator('.pdf-source')).toHaveCount(0);
   await expect(title).toBeVisible();
@@ -57,10 +59,16 @@ test('image-only PDFs retain region capture without inventing selectable text', 
   page,
 }) => {
   await upload(page, makePdfFixture({ imageOnly: true }));
-  await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
   await expect(page.locator('.textLayer span')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reading options' }).click();
   await page.getByRole('button', { name: 'Region', exact: true }).click();
-  const region = await page.getByTestId('region-layer').boundingBox();
+  const region = await page
+    .locator('.pdf-page[data-active="true"] [data-testid="region-layer"]')
+    .boundingBox();
   if (!region) throw new Error('Missing region surface.');
   await page.mouse.move(region.x + 100, region.y + 180);
   await page.mouse.down();
@@ -70,6 +78,7 @@ test('image-only PDFs retain region capture without inventing selectable text', 
   await expect(page.getByRole('status')).toContainText('Highlight saved');
   await page.reload();
   await expect(page.getByTestId('saved-highlight')).toBeVisible();
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
   await page.getByRole('textbox', { name: 'Search this paper' }).fill('visible figure');
   await page.getByRole('button', { name: 'Find supporting passages' }).click();
   await expect(

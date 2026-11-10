@@ -39,6 +39,7 @@ export interface ServiceStatus {
   model: string;
   configured: boolean;
   registrationOpen: boolean;
+  soloAvailable?: boolean;
 }
 
 export interface RoomSummary {

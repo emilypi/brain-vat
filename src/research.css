@@ -223,24 +223,18 @@
   width: 100%;
   height: 100%;
   padding: 0;
-  border-bottom: 1px dotted #689577;
-  background: #56816608;
+  border-bottom: 2px solid var(--link);
+  border-radius: 2px;
+  background: var(--link-wash);
+  cursor: pointer;
 }
 .pdf-source > a:hover,
-.pdf-source > button:hover {
-  background: #56816633;
-}
-.source-toggle {
-  position: absolute;
-  z-index: 5;
-  right: 7px;
-  top: 7px;
-  border: 1px solid var(--line);
-  background: var(--surface, #fcfcf9);
-  color: var(--muted);
-  font-size: 8px;
-  border-radius: 3px;
-  padding: 4px 6px;
+.pdf-source > button:hover,
+.pdf-source > a:focus-visible,
+.pdf-source > button:focus-visible {
+  background: var(--link-hover);
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }
 .source-preview {
   position: absolute;
