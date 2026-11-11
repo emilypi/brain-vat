@@ -73,6 +73,7 @@ function bibliography(pages: ProviderInput['pages']): SourceEvidence[] {
 
 /** Only server-extracted text becomes paper evidence; selection quotes do not. */
 export function buildPaperEvidence(input: ProviderInput): SourceEvidence[] {
+  const selection = input.selection ?? input.proofContext?.sourceAnchor;
   const terms = [
     ...new Set(input.question.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu)),
   ].slice(0, 40);
@@ -83,11 +84,9 @@ export function buildPaperEvidence(input: ProviderInput): SourceEvidence[] {
     selected: boolean;
   }[] = [];
   for (const page of input.pages) {
-    const selected = input.selection?.pageIndex === page.pageIndex;
+    const selected = selection?.pageIndex === page.pageIndex;
     const quoteAt =
-      selected && input.selection?.quote
-        ? page.text.indexOf(input.selection.quote)
-        : -1;
+      selected && selection?.quote ? page.text.indexOf(selection.quote) : -1;
     for (let offset = 0; offset < page.text.length; offset += PASSAGE_CHARS) {
       const excerpt = page.text.slice(offset, offset + PASSAGE_CHARS);
       if (!excerpt.trim()) continue;

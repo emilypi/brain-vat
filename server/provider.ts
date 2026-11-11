@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { buildExternalEvidence, buildPaperEvidence } from './evidence.ts';
 import type { SearchCitation } from './evidence.ts';
+import {
+  LEAN_VERSION,
+  MATHLIB_VERSION,
+  proofBreakdownSchema,
+  proofReferenceError,
+} from '../src/proof.ts';
 import type {
   AiProvider,
   GeneratedAnswer,
@@ -85,6 +91,41 @@ const ANSWER_SCHEMA = z.strictObject({
     .min(1)
     .max(16),
 });
+const PROOF_ANSWER_SCHEMA = ANSWER_SCHEMA.extend({ proof: proofBreakdownSchema });
+
+const PROOF_INSTRUCTIONS = [
+  'Create a proof walkthrough with a short summary and ordered explanatory steps.',
+  'Explain the selected argument, or the exact prerequisite/question requested in',
+  'proofContext. Preserve the mathematical claim; do not silently replace it with',
+  'an easier theorem or assume the conclusion. List every added hypothesis and gap.',
+  'Gaps describe missing mathematics or translation work, never runtime check status;',
+  'the application displays that status separately. Step titles omit numbering.',
+  'State your interpretation of the selection, including a readable transcription',
+  'of any image-based claim, so the reader can correct notation or missing context.',
+  'Treat parent explanations as unverified model proposals, not new evidence.',
+  'Each step states why it follows, cites supplied evidence where available, and',
+  'lists relevant prerequisite IDs. Prerequisites include definitions and lemmas',
+  'the reader may ask to expand; do not invent a proof of a definition.',
+  `Propose Lean ${LEAN_VERSION} with Mathlib ${MATHLIB_VERSION}.`,
+  'The application imports Mathlib.Tactic and Mathlib.Algebra.Module.Basic and',
+  'creates theorem brainVatProof for you. imports lists up to 8 additional specific',
+  'Mathlib.* modules needed for the proof, or [] when none. Never import all Mathlib.',
+  'statement contains ONLY its proposition, using forall/∀ for all parameters,',
+  'typeclasses and hypotheses. No imports, declarations, options, commands, macros',
+  'or code fences. Use explicit types to preserve the intended generality.',
+  'Each step tactic contains a Lean tactic block at the top level of the same',
+  'by proof. Blocks are concatenated in order, with two leading spaces added to',
+  'each line. Preserve internal indentation. Prefer readable small tactic steps.',
+  'Use only ordinary trusted Mathlib tactics. No IO, metaprogram execution,',
+  'unsafe code, native_decide, custom axioms or attempts to bypass checking.',
+  'If no faithful statement can be formulated, return statement null and explain',
+  'the gaps. If a tactic cannot be supplied honestly, return tactic null for that',
+  'step. Never use True, contradictory hypotheses or an assumed conclusion as a',
+  'substitute. A missing tactic is displayed as an admitted step.',
+  'Do not claim Lean accepted the proof or invent observed tactic goals. The',
+  'application checks it independently. Keep statements and explanations concise.',
+  'The ordinary answer blocks summarize this walkthrough for the conversation.',
+].join(' ');
 
 const INSTRUCTIONS = [
   'You help a reading group understand a research paper.',
@@ -233,6 +274,7 @@ function synthesisBody(input: ProviderInput, evidence: SourceEvidence[]): object
     guide:
       'Write a readable study guide with titled sections, key ideas, notation, ' +
       'methods, results and limitations. Map each section to supporting evidence.',
+    proof: PROOF_INSTRUCTIONS,
   }[input.kind];
   const content: object[] = [
     {
@@ -248,6 +290,7 @@ function synthesisBody(input: ProviderInput, evidence: SourceEvidence[]): object
             }
           : null,
         history: capturedHistory(input),
+        ...(input.proofContext ? { proofContext: input.proofContext } : {}),
         evidence,
       }),
     },
@@ -258,19 +301,27 @@ function synthesisBody(input: ProviderInput, evidence: SourceEvidence[]): object
   return {
     instructions: INSTRUCTIONS + ' ' + task,
     input: [{ role: 'user', content }],
-    max_output_tokens: input.kind === 'guide' ? 10_000 : 6000,
+    max_output_tokens:
+      input.kind === 'proof' ? 14_000 : input.kind === 'guide' ? 10_000 : 6000,
     text: {
       format: {
         type: 'json_schema',
         name: 'paper_answer',
         strict: true,
-        schema: z.toJSONSchema(ANSWER_SCHEMA, { target: 'draft-7' }),
+        schema: z.toJSONSchema(
+          input.kind === 'proof' ? PROOF_ANSWER_SCHEMA : ANSWER_SCHEMA,
+          { target: 'draft-7' },
+        ),
       },
     },
   };
 }
 
-function readAnswer(response: ProviderResponse, evidence: SourceEvidence[]) {
+function readAnswer(
+  response: ProviderResponse,
+  evidence: SourceEvidence[],
+  kind: ProviderInput['kind'],
+): Pick<GeneratedAnswer, 'blocks' | 'proof'> {
   let value: unknown;
   try {
     value = JSON.parse(
@@ -282,10 +333,16 @@ function readAnswer(response: ProviderResponse, evidence: SourceEvidence[]) {
     if (reason instanceof ProviderError) throw reason;
     throw new ProviderError('Provider returned malformed answer JSON.');
   }
-  const parsed = ANSWER_SCHEMA.safeParse(value);
+  const schema = kind === 'proof' ? PROOF_ANSWER_SCHEMA : ANSWER_SCHEMA;
+  const parsed = schema.safeParse(value);
   if (!parsed.success) throw new ProviderError('Provider returned an invalid answer.');
+  const answer: Pick<GeneratedAnswer, 'blocks' | 'proof'> = parsed.data;
   const known = new Set(evidence.map((item) => item.id));
-  for (const block of parsed.data.blocks) {
+  if (answer.proof) {
+    const error = proofReferenceError(answer.proof, known);
+    if (error) throw new ProviderError(error);
+  }
+  for (const block of answer.blocks) {
     if (block.evidenceIds.some((id) => !known.has(id))) {
       throw new ProviderError('Provider returned an unknown evidence citation.');
     }
@@ -297,7 +354,7 @@ function readAnswer(response: ProviderResponse, evidence: SourceEvidence[]) {
       throw new ProviderError('Provider returned links outside the evidence list.');
     block.evidenceIds = [...new Set(block.evidenceIds)];
   }
-  return parsed.data.blocks;
+  return answer;
 }
 
 async function boundedBody(response: Response, signal: AbortSignal): Promise<string> {
@@ -421,7 +478,7 @@ export function createAstraProvider(options: ProviderOptions = {}): AiProvider {
         }
         const response = await request(synthesisBody(input, evidence), signal, usage);
         return {
-          blocks: readAnswer(response, evidence),
+          ...readAnswer(response, evidence, input.kind),
           evidence,
           model: response.model ?? model,
           usage,

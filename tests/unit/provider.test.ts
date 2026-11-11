@@ -6,6 +6,7 @@ import {
   safeSourceUrl,
 } from '../../server/evidence.ts';
 import type { ProviderInput } from '../../src/workspace-contract.ts';
+import { PROOF_FIXTURE } from '../fixtures/proofs';
 
 const INPUT: ProviderInput = {
   title: 'Private unpublished paper',
@@ -194,6 +195,148 @@ describe('grounded Responses requests', () => {
       expect(body(fetch).instructions).toContain('inference');
     },
   );
+});
+
+describe('Lean proof proposals', () => {
+  it('requests proposals without accepting model verification', async () => {
+    const fetch = fakeFetch(
+      response(
+        JSON.stringify({
+          blocks: [BLOCK],
+          proof: PROOF_FIXTURE,
+        }),
+      ),
+    );
+    const answer = await createAstraProvider({ apiKey: 'key', fetch }).generate(
+      { ...INPUT, kind: 'proof' },
+      new AbortController().signal,
+    );
+    expect(answer.proof).toEqual(PROOF_FIXTURE);
+    expect(answer.proofArtifact).toBeUndefined();
+    expect(body(fetch).instructions).toContain('Lean 4.35.0');
+    expect(body(fetch).instructions).toContain('Mathlib v4.35.0');
+    expect(body(fetch).instructions).toContain('Do not claim Lean accepted');
+    expect(body(fetch).text.format.schema.required).toContain('proof');
+    expect(body(fetch).text.format.schema.properties.proof.additionalProperties).toBe(
+      false,
+    );
+    expect(body(fetch).tools).toBeUndefined();
+  });
+
+  it('includes selected images and an explicit interpretation', async () => {
+    const fetch = fakeFetch(
+      response(
+        JSON.stringify({
+          blocks: [BLOCK],
+          proof: PROOF_FIXTURE,
+        }),
+      ),
+    );
+    const answer = await createAstraProvider({ apiKey: 'key', fetch }).generate(
+      { ...INPUT, kind: 'proof', selection: REGION, image: PNG },
+      new AbortController().signal,
+    );
+    expect(body(fetch).input[0].content).toContainEqual({
+      type: 'input_image',
+      image_url: PNG,
+      detail: 'high',
+    });
+    expect(body(fetch).instructions).toContain('transcription');
+    expect(answer.proof?.interpretation).toBe(PROOF_FIXTURE.interpretation);
+  });
+
+  it('retains exact parent context beyond recent chat history', async () => {
+    const proofContext: NonNullable<ProviderInput['proofContext']> = {
+      parentRunId: '12345678-1234-4123-8123-123456789abc',
+      title: 'Parent proof',
+      claim: 'An exact older claim.',
+      interpretation: 'The parent interprets an image of an algebraic identity.',
+      summary: 'Older summary.',
+      assumptions: ['Finite support.'],
+      steps: [{ title: 'Rearrange', explanation: 'Use associativity.' }],
+      prerequisite: PROOF_FIXTURE.prerequisites[0]!,
+      sourceAnchor: { ...REGION!, pageIndex: 39 },
+    };
+    const input: ProviderInput = {
+      ...INPUT,
+      kind: 'proof',
+      proofContext,
+      pages: Array.from({ length: 40 }, (_, pageIndex) => ({
+        pageIndex,
+        text: ('Page ' + pageIndex + ' contents. ').repeat(1000),
+      })),
+    };
+    const evidence = buildPaperEvidence(input);
+    expect(evidence[0]?.pageIndex).toBe(39);
+    const fetch = fakeFetch(
+      response(
+        JSON.stringify({
+          blocks: [{ ...BLOCK, evidenceIds: [evidence[0]!.id] }],
+          proof: {
+            ...PROOF_FIXTURE,
+            steps: PROOF_FIXTURE.steps.map((step) => ({
+              ...step,
+              evidenceIds: [evidence[0]!.id],
+            })),
+          },
+        }),
+      ),
+    );
+    await createAstraProvider({ apiKey: 'key', fetch }).generate(
+      input,
+      new AbortController().signal,
+    );
+    const payload = JSON.parse(body(fetch).input[0].content[0].text);
+    expect(payload.proofContext).toEqual(proofContext);
+    expect(payload.history).toEqual([]);
+    expect(payload.evidence[0].pageIndex).toBe(39);
+    expect(body(fetch).input[0].content).toHaveLength(1);
+  });
+
+  it.each(['missing', 'checked', 'unknown-evidence', 'unknown-prerequisite'])(
+    'rejects a %s proof proposal without retrying the paid call',
+    async (invalid) => {
+      const proof = structuredClone(PROOF_FIXTURE);
+      if (invalid === 'unknown-evidence') proof.steps[0]!.evidenceIds = ['invented'];
+      if (invalid === 'unknown-prerequisite')
+        proof.steps[0]!.prerequisiteIds = ['invented'];
+      const value =
+        invalid === 'missing'
+          ? { blocks: [BLOCK] }
+          : {
+              blocks: [BLOCK],
+              proof:
+                invalid === 'checked'
+                  ? {
+                      ...proof,
+                      status: 'checked',
+                    }
+                  : proof,
+            };
+      const fetch = fakeFetch(response(JSON.stringify(value)));
+      await expect(
+        createAstraProvider({ apiKey: 'key', fetch }).generate(
+          { ...INPUT, kind: 'proof' },
+          new AbortController().signal,
+        ),
+      ).rejects.toBeInstanceOf(ProviderError);
+      expect(fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps an unformalized explanation without inventing a proof', async () => {
+    const proof = structuredClone(PROOF_FIXTURE);
+    proof.statement = null;
+    proof.gaps = ['The excerpt does not state the hypotheses.'];
+    proof.steps = proof.steps.map((step) => ({ ...step, tactic: null }));
+    const fetch = fakeFetch(response(JSON.stringify({ blocks: [BLOCK], proof })));
+    const answer = await createAstraProvider({ apiKey: 'key', fetch }).generate(
+      { ...INPUT, kind: 'proof' },
+      new AbortController().signal,
+    );
+    expect(answer.proof?.statement).toBeNull();
+    expect(answer.proof?.gaps).toEqual(proof.gaps);
+  });
 });
 
 describe('explicit external search', () => {
