@@ -8,3 +8,5 @@ logs
 AGENTS.md
 public/samples/*.pdf
 public/pdfjs/
+lean/.lake/
+lean/lake-manifest.json

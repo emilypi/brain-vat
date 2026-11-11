@@ -6,6 +6,7 @@ const skipped = new Set([
   '.git',
   '.wxt',
   '.output',
+  '.lake',
   'dist',
   'public',
   'logs',
@@ -20,7 +21,7 @@ async function check(directory) {
     if (skipped.has(entry.name)) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) await check(path);
-    else if (/\.(?:tsx?|m?js|css|html)$/.test(entry.name)) {
+    else if (/\.(?:tsx?|m?js|css|html|lean|c|toml)$/.test(entry.name)) {
       const lines = (await readFile(path, 'utf8')).split('\n');
       lines.forEach((line, index) => {
         if (line.length > 90) {

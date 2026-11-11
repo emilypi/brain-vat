@@ -14,6 +14,7 @@ export default tseslint.config(
       'public/pdfjs/**',
       'test-results/**',
       'playwright-report/**',
+      'lean/.lake/**',
     ],
   },
   js.configs.recommended,
