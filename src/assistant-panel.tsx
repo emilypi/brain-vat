@@ -14,6 +14,8 @@ import {
 import { findEvidence, pointToViewport } from './document';
 import { ThemeToggle } from './theme-toggle';
 import { AnswerContent } from './enhanced-reader';
+import { InlineDefinition, definitionKey } from './inline-definition';
+import type { DefinitionTarget } from './inline-definition';
 import { runInputSchema } from './workspace-contract';
 import type { AssistantContext } from './bridge';
 import type { Anchor, Evidence, PageBox, Transform } from './document';
@@ -32,6 +34,9 @@ interface AssistantPanelProps {
   showThemeToggle?: boolean;
   room?: RoomConnection | null;
   pdfDocument?: PDFDocumentProxy | null;
+  definitionTarget?: DefinitionTarget | null;
+  onCloseDefinition?: () => void;
+  onDefine?: (anchor: Anchor) => void;
 }
 
 function submitOnEnter(
@@ -57,12 +62,20 @@ function LocalAssistantPanel({
   notice,
   showThemeToggle = false,
   pdfDocument,
+  definitionTarget,
+  onCloseDefinition,
+  onDefine,
 }: AssistantPanelProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const service = useService();
   const [health, setHealth] = useState<ServiceStatus | null>(null);
+  const [healthChecked, setHealthChecked] = useState(false);
+  const [definitionRequestIds, setDefinitionRequestIds] = useState<
+    Record<string, string>
+  >({});
+  const [definitionErrorKey, setDefinitionErrorKey] = useState<string | null>(null);
   const [mode, setMode] = useState<'ask' | 'search'>('ask');
   const [runs, setRuns] = useState<AiRun[]>([]);
   const [busy, setBusy] = useState(false);
@@ -87,6 +100,9 @@ function LocalAssistantPanel({
   useEffect(() => {
     const current = ++generation.current;
     setHealth(null);
+    setHealthChecked(false);
+    setDefinitionRequestIds({});
+    setDefinitionErrorKey(null);
     setRuns([]);
     setError('');
     setPending(null);
@@ -99,6 +115,9 @@ function LocalAssistantPanel({
       })
       .catch(() => {
         if (current === generation.current) setHealth(null);
+      })
+      .finally(() => {
+        if (current === generation.current) setHealthChecked(true);
       });
     return () => {
       generation.current += 1;
@@ -166,6 +185,7 @@ function LocalAssistantPanel({
     inFlight.current = true;
     setBusy(true);
     setError('');
+    setDefinitionErrorKey(null);
     try {
       const image =
         !retry && selection?.kind === 'region' && pdfDocument
@@ -182,6 +202,11 @@ function LocalAssistantPanel({
           externalQuery: null,
         });
       if (current !== generation.current) return;
+      if (input.kind === 'definition' && input.selection) {
+        const key = definitionKey(input.selection, input.externalQuery);
+        setDefinitionErrorKey(key);
+        setDefinitionRequestIds((current) => ({ ...current, [key]: input.requestId }));
+      }
       if (!solo.current) {
         const session = await service.client.request<{ token: string }>(
           '/solo/sessions',
@@ -298,6 +323,15 @@ function LocalAssistantPanel({
                     <button className="text-button" onClick={onSave}>
                       <Highlighter size={14} /> Save highlight
                     </button>
+                    {selection.quote && onDefine && (
+                      <button
+                        className="text-button"
+                        data-define-selection
+                        onClick={() => onDefine(selection)}
+                      >
+                        Define selection
+                      </button>
+                    )}
                     {selection.quote && (
                       <button
                         className="text-button"
@@ -484,6 +518,25 @@ function LocalAssistantPanel({
           </button>
         </div>
       </form>
+      {definitionTarget && onCloseDefinition && context && (
+        <InlineDefinition
+          key={definitionTarget.id}
+          target={definitionTarget}
+          runs={runs}
+          requestIds={definitionRequestIds}
+          pending={pending}
+          busy={busy}
+          indexing={indexing}
+          configured={healthChecked ? aiAvailable : null}
+          error={error}
+          errorKey={definitionErrorKey}
+          pageCount={context.pages.length}
+          onRequest={(input) => void ask(input.question, input)}
+          onCancel={(run) => void cancel(run)}
+          onClose={onCloseDefinition}
+          onNavigate={onNavigate}
+        />
+      )}
     </aside>
   );
 }
@@ -597,12 +650,20 @@ function SharedAssistantPanel({
   onSave,
   notice,
   showThemeToggle = false,
+  definitionTarget,
+  onCloseDefinition,
+  onDefine,
 }: SharedAssistantProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'ask' | 'discuss'>('ask');
   const [externalEnabled, setExternalEnabled] = useState(false);
   const [externalQuery, setExternalQuery] = useState('');
   const [status, setStatus] = useState<ServiceStatus | null>(null);
+  const [healthChecked, setHealthChecked] = useState(false);
+  const [definitionRequestIds, setDefinitionRequestIds] = useState<
+    Record<string, string>
+  >({});
+  const [definitionErrorKey, setDefinitionErrorKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState<PendingRun | null>(null);
@@ -621,6 +682,7 @@ function SharedAssistantPanel({
 
   useEffect(() => {
     const current = ++generation.current;
+    setHealthChecked(false);
     void room.client
       .request<ServiceStatus>('/health')
       .then((health) => {
@@ -632,6 +694,9 @@ function SharedAssistantPanel({
             reason instanceof Error ? reason.message : 'AI service is unavailable.',
           );
         }
+      })
+      .finally(() => {
+        if (generation.current === current) setHealthChecked(true);
       });
     return () => {
       generation.current += 1;
@@ -650,6 +715,15 @@ function SharedAssistantPanel({
       if (request.roomId !== roomId || request.documentId !== documentId) return;
       setBusy(true);
       setError('');
+      setDefinitionErrorKey(null);
+      if (request.input.kind === 'definition' && request.input.selection) {
+        const key = definitionKey(request.input.selection, request.input.externalQuery);
+        setDefinitionErrorKey(key);
+        setDefinitionRequestIds((current) => ({
+          ...current,
+          [key]: request.input.requestId,
+        }));
+      }
       try {
         const run = await room.client.request<AiRun>(`/rooms/${roomId}/runs`, {
           method: 'POST',
@@ -856,8 +930,11 @@ function SharedAssistantPanel({
                     className="text-button"
                     aria-haspopup="dialog"
                     onClick={() => {
-                      setDefinitionId(null);
-                      setDefinitionOpen(true);
+                      if (onDefine) onDefine(selection);
+                      else {
+                        setDefinitionId(null);
+                        setDefinitionOpen(true);
+                      }
                     }}
                   >
                     Expand definition
@@ -1051,6 +1128,34 @@ function SharedAssistantPanel({
           </button>
         </div>
       </form>
+      {definitionTarget && onCloseDefinition && (
+        <InlineDefinition
+          key={definitionTarget.id}
+          target={definitionTarget}
+          runs={runs}
+          requestIds={definitionRequestIds}
+          pending={pending?.input ?? null}
+          busy={busy}
+          indexing={indexing}
+          configured={healthChecked ? Boolean(status?.configured) : null}
+          error={error}
+          errorKey={definitionErrorKey}
+          pageCount={room.state.room.pageCount}
+          onRequest={(input) => {
+            if (
+              input.selection?.documentId !== documentId ||
+              room.state.room.documentId !== documentId
+            )
+              return;
+            const request = { roomId, documentId, input };
+            setPending(request);
+            void deliver(request);
+          }}
+          onCancel={cancelRun}
+          onClose={onCloseDefinition}
+          onNavigate={onNavigate}
+        />
+      )}
       <dialog
         ref={dialog}
         className="definition-dialog"

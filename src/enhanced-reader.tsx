@@ -49,12 +49,14 @@ interface AnswerContentProps {
   answer: GeneratedAnswer;
   pageCount: number;
   onNavigate: (pageIndex: number) => void;
+  showOrigins?: boolean;
 }
 
 export function AnswerContent({
   answer,
   pageCount,
   onNavigate,
+  showOrigins = false,
 }: AnswerContentProps): React.JSX.Element {
   const error = validateAnswerEvidence(answer, pageCount);
   if (error)
@@ -68,6 +70,21 @@ export function AnswerContent({
     <div className="generated-answer">
       {answer.blocks.map((block, index) => (
         <section key={index} className="answer-block">
+          {showOrigins && (
+            <div className="definition-origins">
+              {[
+                ...new Set(
+                  block.evidenceIds.flatMap((id) => {
+                    const source = sources.get(id);
+                    return source ? [sourceOriginLabel(source.origin)] : [];
+                  }),
+                ),
+              ].map((label) => (
+                <span key={label}>{label}</span>
+              ))}
+              {!block.evidenceIds.length && <span>Uncited explanation</span>}
+            </div>
+          )}
           {block.heading && <h3>{block.heading}</h3>}
           <p>{block.text}</p>
           {block.evidenceIds.length > 0 ? (

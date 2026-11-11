@@ -21,6 +21,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { AssistantPanel } from './assistant-panel';
+import type { DefinitionTarget } from './inline-definition';
 import { ThemeToggle } from './theme-toggle';
 import { EnhancedReader } from './enhanced-reader';
 import { useRoom, useService } from './workspace-client';
@@ -88,6 +89,15 @@ export function ReaderApp({
   const [rotation, setRotation] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(null);
   const [selection, setSelection] = useState<Anchor | null>(null);
+  const [definitionTarget, setDefinitionTarget] = useState<DefinitionTarget | null>(
+    null,
+  );
+  const defineSelection = useCallback((anchor: Anchor): void => {
+    setEnhanced(false);
+    setSelection(anchor);
+    setDefinitionTarget({ id: crypto.randomUUID(), anchor });
+  }, []);
+  const closeDefinition = useCallback(() => setDefinitionTarget(null), []);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -669,9 +679,11 @@ export function ReaderApp({
                 selectionMode={selectionMode}
                 highlights={visibleHighlights}
                 selection={selection}
+                onDefine={defineSelection}
                 onNavigate={navigateToPage}
                 onSelect={(anchor) => {
                   setSelection(anchor);
+                  setDefinitionTarget(null);
                   setNotice('');
                 }}
               />
@@ -681,6 +693,15 @@ export function ReaderApp({
             <div className="reader-bottom">
               {selection && !showPanel && (
                 <div className="selection-shortcuts" aria-label="Selection actions">
+                  {selection.kind === 'text' && selection.quote && !enhanced && (
+                    <button
+                      className="text-button"
+                      data-define-selection
+                      onClick={() => defineSelection(selection)}
+                    >
+                      Define
+                    </button>
+                  )}
                   <button className="text-button" onClick={saveSelection}>
                     <Highlighter size={15} /> Save highlight
                   </button>
@@ -959,6 +980,15 @@ export function ReaderApp({
           key={sessionId}
           room={room.connection}
           pdfDocument={pdf.document}
+          definitionTarget={
+            !enhanced &&
+            paper?.id === definitionTarget?.anchor.documentId &&
+            selection === definitionTarget?.anchor
+              ? definitionTarget
+              : null
+          }
+          onCloseDefinition={closeDefinition}
+          onDefine={defineSelection}
           context={
             paper
               ? {

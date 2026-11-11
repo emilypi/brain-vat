@@ -3,7 +3,8 @@
 ## Current delivery
 
 - Astra-backed conversations grounded in paper passages and selected regions.
-- Source links and definition expansion with explicit evidence origins.
+- Source links and inline definition cards with explicit evidence origins,
+  paper explanations, and opt-in outside searches in solo and shared reading.
 - Browser accounts, durable storage, backups, and web/extension synchronization.
 - Optional enhanced reading mode with source navigation.
 - Browser invite links, shared annotations and AI conversations, collaborative
