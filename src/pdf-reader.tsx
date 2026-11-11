@@ -28,6 +28,7 @@ interface PdfReaderProps {
   highlights: Highlight[];
   selection: Anchor | null;
   onSelect: (anchor: Anchor | null) => void;
+  onDefine: (anchor: Anchor) => void;
   onNavigate: (pageIndex: number) => void;
   onVisiblePage: (pageIndex: number) => void;
 }
@@ -55,6 +56,7 @@ export function PdfReader({
   highlights,
   selection,
   onSelect,
+  onDefine,
   onNavigate,
   onVisiblePage,
 }: PdfReaderProps): React.JSX.Element {
@@ -218,6 +220,7 @@ export function PdfReader({
                   highlights={highlights}
                   selection={selection}
                   onSelect={onSelect}
+                  onDefine={onDefine}
                   onNavigate={onNavigate}
                 />
               ) : (

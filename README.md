@@ -44,6 +44,19 @@ keys for one-pixel adjustments; Shift increases the step to ten pixels. Escape
 cancels a drawing or clears the box. **Save highlight** and **Ask about selection**
 use the refined selection; **Done** returns to ordinary PDF selection.
 
+Select a term, then choose **Define** beside it for a compact inline explanation.
+This works with ordinary text selection and the precision **Text** tool, in both
+solo reading and shared rooms. **In this paper** explains its contextual meaning;
+**Outside sources** lets you edit the search terms before choosing **Look up**.
+Evidence origins are labeled, and expanding **Sources** opens page citations or
+external links. Escape or a click outside dismisses the card. It follows scrolling
+and zoom, and hides when the selected passage is offscreen.
+
+Definitions use the configured AI service only after you choose **Define**. Reopening
+the same term on the same page reuses its answer during that reading session.
+Definitions also appear in **Ask**, and shared-room definitions remain in the room's
+conversation. Failed delivery can be retried with the original request ID.
+
 ## Ask Astra while reading solo
 
 Put `OPENAI_API_KEY=...` in `.env` and restart the server. Open a local paper and

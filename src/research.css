@@ -160,6 +160,119 @@
 .definition-dialog::backdrop {
   background: var(--scrim, #26352666);
 }
+.inline-define-trigger {
+  position: absolute;
+  z-index: 6;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 2px 8px #0002;
+  font-size: 11px;
+  line-height: 18px;
+}
+.inline-definition {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(480px, calc(100dvh - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 6px 24px #0003;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.inline-definition > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.inline-definition > header > div {
+  min-width: 0;
+}
+.inline-definition h2 {
+  margin: 3px 0 12px;
+  font-family: Georgia, serif;
+  font-size: 19px;
+  font-weight: 400;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.definition-tabs {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.definition-tabs button,
+.definition-search button {
+  padding: 6px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+.definition-tabs button[aria-pressed='true'],
+.definition-search button {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+.definition-search {
+  margin-top: 12px;
+}
+.definition-search label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.definition-search > div {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.definition-search input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 5px;
+  padding: 7px;
+  font-size: 12px;
+}
+.definition-search > p {
+  font-size: 10px;
+  color: var(--muted);
+}
+.definition-origins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.definition-origins span {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  padding: 1px 5px;
+  font-size: 10px;
+}
+.inline-definition .answer-block {
+  margin: 12px 0;
+}
+.inline-definition .answer-block h3 {
+  margin: 7px 0;
+}
 .definition-dialog h2 {
   font-family: Georgia, serif;
   font-weight: 400;

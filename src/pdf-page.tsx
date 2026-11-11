@@ -21,6 +21,7 @@ interface PdfPageProps {
   highlights: Highlight[];
   selection: Anchor | null;
   onSelect: (anchor: Anchor | null) => void;
+  onDefine: (anchor: Anchor) => void;
   onNavigate?: (pageIndex: number) => void;
 }
 
@@ -54,6 +55,7 @@ export function PdfPage({
   highlights,
   selection,
   onSelect,
+  onDefine,
   onNavigate,
 }: PdfPageProps): React.JSX.Element {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -240,6 +242,23 @@ export function PdfPage({
     });
   }
 
+  const term =
+    selection?.documentId === documentId &&
+    selection.pageIndex === pageIndex &&
+    selection.kind === 'text' &&
+    selection.quote.trim()
+      ? selection
+      : null;
+  const termPoints =
+    geometry && term
+      ? term.quads.flatMap((quad) =>
+          quad.map((point) => pointToViewport(point, geometry.transform, geometry.box)),
+        )
+      : [];
+  const termTop = Math.min(...termPoints.map((point) => point.y));
+  const termBottom = Math.max(...termPoints.map((point) => point.y));
+  const termRight = Math.max(...termPoints.map((point) => point.x));
+
   return (
     <div
       ref={surface}
@@ -360,6 +379,32 @@ export function PdfPage({
         />
       )}
       {!ready && !error && <div className="page-loading">Rendering page…</div>}
+      {ready && geometry && term && termPoints.length > 0 && (
+        <button
+          className="inline-define-trigger"
+          data-define-selection
+          aria-label="Define selected text"
+          style={{
+            left: Math.max(4, Math.min(termRight - 60, geometry.width - 68)),
+            top: Math.min(
+              geometry.height - 34,
+              termTop >= 40 ? termTop - 36 : termBottom + 12,
+            ),
+          }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerUp={(event) => event.stopPropagation()}
+          onKeyUp={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDefine(term);
+          }}
+        >
+          Define
+        </button>
+      )}
       {error && (
         <div className="page-loading" role="alert">
           {error}
