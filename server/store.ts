@@ -20,6 +20,13 @@ import type {
   SharedHighlight,
 } from '../src/workspace-contract.ts';
 import { digest, newToken } from './auth.ts';
+import type { ProofBreakdown, ProofCheck, ProofCheckResult } from '../src/proof.ts';
+import {
+  newProofCheck,
+  proofCheckOutcome,
+  proofContextFor,
+  proofSourceHash,
+} from './proofs.ts';
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -82,6 +89,12 @@ const SCHEMA = `
     UNIQUE(room_id, actor_id, request_id)
   );
   CREATE INDEX IF NOT EXISTS runs_actor_created ON runs(actor_id, created);
+  CREATE TABLE IF NOT EXISTS proof_checks (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL REFERENCES accounts(id), status TEXT NOT NULL,
+    created INTEGER NOT NULL, body TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS notes (
     room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
     state BLOB NOT NULL, revision INTEGER NOT NULL
@@ -113,6 +126,19 @@ export class WorkspaceStore {
       });
       this.execute('UPDATE runs SET input = ? WHERE id = ?', '{}', run.id);
     }
+    for (const row of this.all(
+      "SELECT body FROM proof_checks WHERE status = 'running'",
+    )) {
+      const check = body<ProofCheck>(row);
+      this.updateProofCheck({
+        ...check,
+        ...proofCheckOutcome(
+          'failed',
+          'Server restarted before verification finished; the outcome is unconfirmed.',
+        ),
+        finishedAt: new Date().toISOString(),
+      });
+    }
   }
 
   close(): void {
@@ -139,7 +165,10 @@ export class WorkspaceStore {
          SELECT length(CAST(body AS BLOB)) FROM messages WHERE room_id = ?
          UNION ALL
          SELECT length(CAST(body AS BLOB)) FROM runs WHERE room_id = ?
+         UNION ALL
+         SELECT length(CAST(body AS BLOB)) FROM proof_checks WHERE room_id = ?
        )`,
+      id,
       id,
       id,
       id,
@@ -560,7 +589,19 @@ export class WorkspaceStore {
         return { run: body<AiRun>(prior), fresh: false };
       }
       if (!configured) throw new ApiError(503, 'AI provider is not configured.');
+      if (input.proofParent && input.kind !== 'proof')
+        throw new ApiError(400, 'A proof parent requires a proof request.');
+      if (input.proofParent && (input.selection || input.image))
+        throw new ApiError(400, 'A prerequisite uses its parent proof’s source.');
       if (input.selection) this.validateAnchor(room, input.selection);
+      const proofContext = input.proofParent
+        ? proofContextFor(
+            this.run(id, actor.id, input.proofParent.runId),
+            input.proofParent,
+          )
+        : null;
+      if (input.proofParent && !proofContext)
+        throw new ApiError(400, 'The parent proof or prerequisite is unavailable.');
       const daily = this.get(
         'SELECT count(*) AS n FROM runs WHERE actor_id = ? AND created >= ?',
         actor.id,
@@ -584,6 +625,7 @@ export class WorkspaceStore {
         externalQuery: input.externalQuery,
         pages: JSON.parse(String(pages?.pages)) as PaperPassage[],
         history: this.messages(id, 50),
+        ...(proofContext ? { proofContext } : {}),
       };
       const run: AiRun = {
         id: randomUUID(),
@@ -710,12 +752,153 @@ export class WorkspaceStore {
           actorId,
         )
       : this.all("SELECT body FROM runs WHERE room_id = ? AND status = 'running'", id);
-    return rows.map((row) => {
+    const runIds = rows.map((row) => {
       const run = body<AiRun>(row);
       this.updateRun({ ...run, status: 'cancelled', error: 'Access was revoked.' });
       this.execute('UPDATE runs SET input = ? WHERE id = ?', '{}', run.id);
       return run.id;
     });
+    const checks = actorId
+      ? this.all(
+          'SELECT body FROM proof_checks WHERE room_id = ? AND actor_id = ? ' +
+            "AND status = 'running'",
+          id,
+          actorId,
+        )
+      : this.all(
+          "SELECT body FROM proof_checks WHERE room_id = ? AND status = 'running'",
+          id,
+        );
+    for (const row of checks) {
+      const check = body<ProofCheck>(row);
+      this.updateProofCheck({
+        ...check,
+        ...proofCheckOutcome('cancelled', 'Access was revoked; verification stopped.'),
+        finishedAt: new Date().toISOString(),
+      });
+      runIds.push(check.runId);
+    }
+    return [...new Set(runIds)];
+  }
+
+  run(id: string, actorId: string, runId: string): AiRun {
+    this.room(id, actorId);
+    const row = this.get(
+      'SELECT body FROM runs WHERE room_id = ? AND id = ?',
+      id,
+      runId,
+    );
+    if (!row) throw new ApiError(404, 'Request not found in this room.');
+    return body<AiRun>(row);
+  }
+
+  proofCheck(id: string, actorId: string, runId: string): ProofCheck | null {
+    const run = this.run(id, actorId, runId);
+    if (run.status !== 'completed' || !run.answer?.proofArtifact || !run.answer.proof)
+      throw new ApiError(409, 'A completed proof is required for verification.');
+    const row = this.get('SELECT body FROM proof_checks WHERE run_id = ?', runId);
+    return row ? body<ProofCheck>(row) : null;
+  }
+
+  beginProofCheck(
+    id: string,
+    actorId: string,
+    runId: string,
+    sourceHash: string,
+    retryUnavailable: boolean,
+  ): { check: ProofCheck; fresh: boolean; proof: ProofBreakdown } {
+    return this.transaction(() => {
+      const prior = this.proofCheck(id, actorId, runId);
+      const run = this.run(id, actorId, runId);
+      const proof = run.answer!.proof!;
+      if (
+        sourceHash !== run.answer!.proofArtifact!.sourceHash ||
+        sourceHash !== proofSourceHash(proof)
+      )
+        throw new ApiError(409, 'The requested source does not match this proof.');
+      if (prior && !(retryUnavailable && prior.status === 'unavailable'))
+        return { check: prior, fresh: false, proof };
+      const daily = this.get(
+        'SELECT count(*) AS n FROM proof_checks WHERE actor_id = ? AND created >= ?',
+        actorId,
+        Date.now() - 86_400_000,
+      );
+      if (Number(daily?.n) >= 100)
+        throw new ApiError(429, 'Lean verification limit reached. Try again later.');
+      const check = newProofCheck(runId, sourceHash);
+      this.checkSharedSize(id, Buffer.byteLength(JSON.stringify(check)));
+      this.execute(
+        `INSERT INTO proof_checks VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET actor_id = excluded.actor_id,
+         status = excluded.status, created = excluded.created, body = excluded.body`,
+        runId,
+        id,
+        actorId,
+        check.status,
+        Date.now(),
+        JSON.stringify(check),
+      );
+      return { check, fresh: true, proof };
+    });
+  }
+
+  private updateProofCheck(check: ProofCheck): void {
+    this.execute(
+      'UPDATE proof_checks SET status = ?, body = ? WHERE run_id = ?',
+      check.status,
+      JSON.stringify(check),
+      check.runId,
+    );
+  }
+
+  finishProofCheck(check: ProofCheck, result: ProofCheckResult): void {
+    this.transaction(() => {
+      const row = this.get('SELECT * FROM proof_checks WHERE run_id = ?', check.runId);
+      if (!row || row.status !== 'running' || body<ProofCheck>(row).id !== check.id)
+        return;
+      const member = this.get(
+        'SELECT user_id FROM members WHERE room_id = ? AND user_id = ?',
+        String(row.room_id),
+        String(row.actor_id),
+      );
+      let next: ProofCheck = {
+        ...check,
+        ...(member ? result : proofCheckOutcome('cancelled', 'Access was revoked.')),
+        finishedAt: new Date().toISOString(),
+      };
+      try {
+        this.checkSharedSize(
+          String(row.room_id),
+          Buffer.byteLength(JSON.stringify(next)) - Buffer.byteLength(String(row.body)),
+        );
+      } catch {
+        next = {
+          ...check,
+          ...proofCheckOutcome(
+            'failed',
+            'The room cannot store the verification result; not checked.',
+          ),
+          finishedAt: new Date().toISOString(),
+        };
+      }
+      this.updateProofCheck(next);
+    });
+  }
+
+  cancelProofCheck(id: string, actorId: string, runId: string): ProofCheck {
+    const check = this.proofCheck(id, actorId, runId);
+    if (!check) throw new ApiError(404, 'No verification exists for this proof.');
+    const row = this.get('SELECT actor_id FROM proof_checks WHERE run_id = ?', runId);
+    if (row?.actor_id !== actorId && this.room(id, actorId).role !== 'owner')
+      throw new ApiError(403, 'Only the requester or room owner may cancel a check.');
+    if (check.status !== 'running') return check;
+    const cancelled: ProofCheck = {
+      ...check,
+      ...proofCheckOutcome('cancelled', 'Lean verification was cancelled.'),
+      finishedAt: new Date().toISOString(),
+    };
+    this.updateProofCheck(cancelled);
+    return cancelled;
   }
 
   mergeNotes(id: string, actorId: string, update: Uint8Array): Uint8Array {

@@ -15,6 +15,14 @@ import { decodeBase64, extractPdf, PdfImportError } from './pdf-import.ts';
 import { createAstraProvider, ProviderError } from './provider.ts';
 import { ApiError, WorkspaceStore } from './store.ts';
 import { localRequest, registerSolo } from './solo.ts';
+import { proofBreakdownSchema, proofReferenceError } from '../src/proof.ts';
+import type { LeanChecker, ProofCheck } from '../src/proof.ts';
+import {
+  attachProofArtifact,
+  proofCheckOutcome,
+  ProofExecutor,
+  unavailableLeanChecker,
+} from './proofs.ts';
 
 export interface AppOptions {
   dbPath?: string;
@@ -23,12 +31,16 @@ export interface AppOptions {
   webRoot?: string;
   registrationOpen?: boolean;
   enableSolo?: boolean;
+  leanChecker?: LeanChecker;
 }
 
 const idSchema = z.string().uuid();
 const roomParams = z.object({ id: idSchema });
 const highlightParams = roomParams.extend({ hid: idSchema });
 const runParams = roomParams.extend({ runId: idSchema });
+const proofCheckInput = z.strictObject({
+  sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
 const noteSchema = z.string().max(10_000);
 const versionSchema = z.number().int().positive();
 const safeUrl = z
@@ -53,6 +65,7 @@ const importSchema = z
   })
   .strict();
 const answerSchema = z.object({
+  proof: proofBreakdownSchema.optional(),
   blocks: z
     .array(
       z.object({
@@ -97,6 +110,7 @@ function validateAnswer(value: GeneratedAnswer, pageCount: number): GeneratedAns
   if (
     JSON.stringify(answer).length > 500_000 ||
     ids.size !== answer.evidence.length ||
+    (answer.proof && proofReferenceError(answer.proof, ids) !== null) ||
     answer.blocks.some((block) => block.evidenceIds.some((id) => !ids.has(id))) ||
     answer.evidence.some(
       (source) => source.pageIndex !== null && source.pageIndex >= pageCount,
@@ -104,12 +118,14 @@ function validateAnswer(value: GeneratedAnswer, pageCount: number): GeneratedAns
   ) {
     throw new Error('Invalid provider answer.');
   }
-  return answer;
+  const { proof, ...content } = answer;
+  return { ...content, ...(proof ? { proof } : {}) };
 }
 
 export async function createApp(options: AppOptions = {}): Promise<FastifyInstance> {
   const store = new WorkspaceStore(options.dbPath ?? './data/brain-vat.sqlite');
   const provider = options.provider ?? createAstraProvider();
+  const proofs = new ProofExecutor(options.leanChecker ?? unavailableLeanChecker);
   const registrationOpen = options.registrationOpen ?? false;
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
   const actors = new WeakMap<FastifyRequest, Account>();
@@ -206,10 +222,46 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   };
   const roomId = (request: FastifyRequest) => roomParams.parse(request.params).id;
   const abort = (ids: string[]) => {
-    for (const id of ids) jobs.get(id)?.abort();
+    for (const id of ids) {
+      jobs.get(id)?.abort();
+      proofs.cancel(id);
+    }
   };
 
-  async function executeRun(runId: string): Promise<void> {
+  async function startProofCheck(
+    id: string,
+    actorId: string,
+    runId: string,
+    sourceHash: string,
+    automatic = false,
+  ): Promise<ProofCheck | null> {
+    const prior = store.proofCheck(id, actorId, runId);
+    const health = await proofs.status();
+    if (automatic && (!health.available || prior)) return prior;
+    if (closing) return null;
+    const accepted = store.beginProofCheck(
+      id,
+      actorId,
+      runId,
+      sourceHash,
+      health.available,
+    );
+    if (!accepted.fresh) return accepted.check;
+    const finish = (result: Parameters<WorkspaceStore['finishProofCheck']>[1]) =>
+      store.finishProofCheck(accepted.check, result);
+    if (!health.available) finish(proofCheckOutcome('unavailable', health.message));
+    else if (!proofs.schedule(runId, accepted.proof, finish)) {
+      finish(
+        proofCheckOutcome(
+          'unavailable',
+          'Lean verification is busy or at its daily limit. Try again later.',
+        ),
+      );
+    }
+    return store.proofCheck(id, actorId, runId);
+  }
+
+  async function executeRun(runId: string, id: string, actorId: string): Promise<void> {
     const controller = new AbortController();
     jobs.set(runId, controller);
     const timer = setTimeout(() => controller.abort(), 5 * 60_000);
@@ -238,7 +290,19 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
           error: 'Provider outcome was not confirmed before the request ended.',
         });
       } else {
-        store.finishRun(runId, { answer: validateAnswer(answer, input.pages.length) });
+        const validated = attachProofArtifact(
+          validateAnswer(answer, input.pages.length),
+          input,
+        );
+        store.finishRun(runId, { answer: validated });
+        if (validated.proofArtifact)
+          void startProofCheck(
+            id,
+            actorId,
+            runId,
+            validated.proofArtifact.sourceHash,
+            true,
+          ).catch(() => undefined);
       }
     } catch (error) {
       if (!closing) {
@@ -263,6 +327,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   app.addHook('onClose', async () => {
     closing = true;
     abort([...jobs.keys()]);
+    proofs.close();
     store.close();
   });
   await registerSolo(
@@ -271,6 +336,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     options.enableSolo ?? false,
     allowedOrigins,
     validateAnswer,
+    proofs,
   );
   app.get('/api/health', async (request) => ({
     provider: provider.name,
@@ -278,6 +344,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     configured: provider.configured,
     soloAvailable: Boolean(options.enableSolo) && localRequest(request),
     registrationOpen: store.registrationAvailable(registrationOpen),
+    lean: await proofs.status(),
   }));
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
   app.post('/api/auth/register', authLimit, async (request, reply) => {
@@ -401,16 +468,13 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
         throw new ApiError(400, 'Invalid PNG image.');
       }
     }
-    const result = store.beginRun(
-      roomId(request),
-      actor(request),
-      input,
-      provider.configured,
-    );
+    const id = roomId(request);
+    const account = actor(request);
+    const result = store.beginRun(id, account, input, provider.configured);
     if (result.fresh) {
       // Persistent acceptance precedes dispatch; reconnects observe the same run.
       setImmediate(() => {
-        void executeRun(result.run.id).catch(() => {
+        void executeRun(result.run.id, id, account.id).catch(() => {
           // A durable storage failure leaves the run uncertain on next startup.
         });
       });
@@ -420,7 +484,28 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   app.post('/api/rooms/:id/runs/:runId/cancel', async (request) => {
     const params = runParams.parse(request.params);
     const result = store.cancelRun(params.id, actor(request).id, params.runId);
-    abort([params.runId]);
+    jobs.get(params.runId)?.abort();
+    return result;
+  });
+  app.get('/api/rooms/:id/runs/:runId/proof-check', async (request) => {
+    const params = runParams.parse(request.params);
+    return store.proofCheck(params.id, actor(request).id, params.runId);
+  });
+  app.post('/api/rooms/:id/runs/:runId/proof-check', async (request, reply) => {
+    const params = runParams.parse(request.params);
+    const { sourceHash } = proofCheckInput.parse(request.body);
+    const check = await startProofCheck(
+      params.id,
+      actor(request).id,
+      params.runId,
+      sourceHash,
+    );
+    return reply.code(check?.status === 'running' ? 202 : 200).send(check);
+  });
+  app.post('/api/rooms/:id/runs/:runId/proof-check/cancel', async (request) => {
+    const params = runParams.parse(request.params);
+    const result = store.cancelProofCheck(params.id, actor(request).id, params.runId);
+    proofs.cancel(params.runId);
     return result;
   });
   app.post('/api/rooms/:id/notes', async (request) => {

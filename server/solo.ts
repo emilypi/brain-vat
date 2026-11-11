@@ -7,7 +7,17 @@ import type {
   AiRun,
   ChatMessage,
   GeneratedAnswer,
+  ProviderInput,
 } from '../src/workspace-contract.ts';
+import type { ProofCheck, ProofCheckResult } from '../src/proof.ts';
+import {
+  attachProofArtifact,
+  newProofCheck,
+  proofCheckOutcome,
+  proofContextFor,
+  proofSourceHash,
+} from './proofs.ts';
+import type { ProofExecutor } from './proofs.ts';
 import { ApiError } from './store.ts';
 import { ProviderError } from './provider.ts';
 
@@ -35,9 +45,12 @@ const paperSchema = z
   );
 type SoloPaper = z.infer<typeof paperSchema>;
 interface SoloSession {
+  id: string;
+  closed: boolean;
   paper: SoloPaper;
   expires: number;
   runs: Map<string, { run: AiRun; digest: string; controller: AbortController }>;
+  checks: Map<string, ProofCheck>;
 }
 
 export function localRequest(request: FastifyRequest): boolean {
@@ -65,6 +78,7 @@ export async function registerSolo(
   enabled: boolean,
   allowedOrigins: Set<string>,
   validate: (answer: GeneratedAnswer, pageCount: number) => GeneratedAnswer,
+  proofs: ProofExecutor,
 ): Promise<void> {
   const sessions = new Map<string, SoloSession>();
   let active = 0;
@@ -72,7 +86,11 @@ export async function registerSolo(
   let day = new Date().toISOString().slice(0, 10);
   const actors = new WeakMap<FastifyRequest, SoloSession>();
   const dispose = (token: string, session: SoloSession): void => {
-    for (const item of session.runs.values()) item.controller.abort();
+    session.closed = true;
+    for (const item of session.runs.values()) {
+      item.controller.abort();
+      proofs.cancel('solo:' + session.id + ':' + item.run.id);
+    }
     sessions.delete(token);
   };
   const sweep = (): void => {
@@ -86,6 +104,56 @@ export async function registerSolo(
     clearInterval(timer);
     for (const [token, session] of sessions) dispose(token, session);
   });
+
+  const proofRun = (session: SoloSession, runId: string): AiRun => {
+    const run = session.runs.get(runId)?.run;
+    if (!run) throw new ApiError(404, 'Proof not found in this session.');
+    if (run.status !== 'completed' || !run.answer?.proof || !run.answer.proofArtifact)
+      throw new ApiError(409, 'A completed proof is required for verification.');
+    return run;
+  };
+  const startCheck = async (
+    session: SoloSession,
+    runId: string,
+    sourceHash: string,
+    automatic = false,
+  ): Promise<ProofCheck | null> => {
+    const run = proofRun(session, runId);
+    const proof = run.answer!.proof!;
+    if (
+      run.answer!.proofArtifact!.sourceHash !== sourceHash ||
+      proofSourceHash(proof) !== sourceHash
+    )
+      throw new ApiError(409, 'The requested source does not match this proof.');
+    const health = await proofs.status();
+    if (session.closed) throw new ApiError(401, 'Solo session expired.');
+    const prior = session.checks.get(runId);
+    if (automatic && (!health.available || prior)) return prior ?? null;
+    if (prior && !(prior.status === 'unavailable' && health.available)) return prior;
+    const check = newProofCheck(runId, sourceHash);
+    session.checks.set(runId, check);
+    const finish = (result: ProofCheckResult): void => {
+      if (
+        !session.closed &&
+        session.checks.get(runId)?.id === check.id &&
+        session.checks.get(runId)?.status === 'running'
+      )
+        session.checks.set(runId, {
+          ...check,
+          ...result,
+          finishedAt: new Date().toISOString(),
+        });
+    };
+    if (!health.available) finish(proofCheckOutcome('unavailable', health.message));
+    else if (!proofs.schedule('solo:' + session.id + ':' + runId, proof, finish))
+      finish(
+        proofCheckOutcome(
+          'unavailable',
+          'Lean verification is busy or at its daily limit. Try again later.',
+        ),
+      );
+    return session.checks.get(runId)!;
+  };
 
   await app.register(
     async (solo) => {
@@ -131,9 +199,12 @@ export async function registerSolo(
           const paper = paperSchema.parse(request.body);
           const token = randomBytes(32).toString('base64url');
           sessions.set(token, {
+            id: randomUUID(),
+            closed: false,
             paper,
             expires: Date.now() + 60 * 60_000,
             runs: new Map(),
+            checks: new Map(),
           });
           return reply.code(201).send({ token });
         },
@@ -154,6 +225,21 @@ export async function registerSolo(
           if (existing.digest !== digest) throw new ApiError(409, 'Request ID reused.');
           return existing.run;
         }
+        if (input.proofParent && input.kind !== 'proof')
+          throw new ApiError(400, 'A proof parent requires a proof request.');
+        if (input.proofParent && (input.selection || input.image))
+          throw new ApiError(400, 'A prerequisite uses its parent proof’s source.');
+        const parent = input.proofParent
+          ? session.runs.get(input.proofParent.runId)?.run
+          : undefined;
+        if (input.proofParent && !parent)
+          throw new ApiError(404, 'Parent proof not found in this session.');
+        const proofContext =
+          input.proofParent && parent
+            ? proofContextFor(parent, input.proofParent)
+            : null;
+        if (input.proofParent && !proofContext)
+          throw new ApiError(400, 'The parent proof or prerequisite is unavailable.');
         if (
           input.selection &&
           (input.selection.documentId !== session.paper.documentId ||
@@ -199,6 +285,12 @@ export async function registerSolo(
           error: null,
         };
         const controller = new AbortController();
+        const providerInput: ProviderInput = {
+          ...input,
+          ...session.paper,
+          history,
+          ...(proofContext ? { proofContext } : {}),
+        };
         session.runs.set(run.id, { run, digest, controller });
         active += 1;
         startedToday += 1;
@@ -215,16 +307,23 @@ export async function registerSolo(
               );
             });
             const answer = await Promise.race([
-              provider.generate(
-                { ...input, ...session.paper, history },
-                controller.signal,
-              ),
+              provider.generate(providerInput, controller.signal),
               interrupted,
             ]);
             if (controller.signal.aborted)
               throw new ProviderError('Interrupted.', true);
-            run.answer = validate(answer, session.paper.pages.length);
+            run.answer = attachProofArtifact(
+              validate(answer, session.paper.pages.length),
+              providerInput,
+            );
             run.status = 'completed';
+            if (run.answer.proofArtifact)
+              void startCheck(
+                session,
+                run.id,
+                run.answer.proofArtifact.sourceHash,
+                true,
+              ).catch(() => undefined);
           } catch (error) {
             run.status =
               controller.signal.aborted ||
@@ -255,6 +354,39 @@ export async function registerSolo(
         if (!item) throw new ApiError(404, 'Question not found in this session.');
         if (item.run.status === 'running') item.controller.abort();
         return item.run;
+      });
+      const paramsSchema = z.object({ id: z.string().uuid() });
+      solo.get('/runs/:id/proof-check', async (request) => {
+        const { id } = paramsSchema.parse(request.params);
+        const session = actors.get(request)!;
+        proofRun(session, id);
+        return session.checks.get(id) ?? null;
+      });
+      solo.post('/runs/:id/proof-check', async (request, reply) => {
+        const { id } = paramsSchema.parse(request.params);
+        const { sourceHash } = z
+          .strictObject({
+            sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+          })
+          .parse(request.body);
+        const check = await startCheck(actors.get(request)!, id, sourceHash);
+        return reply.code(check?.status === 'running' ? 202 : 200).send(check);
+      });
+      solo.post('/runs/:id/proof-check/cancel', async (request) => {
+        const { id } = paramsSchema.parse(request.params);
+        const session = actors.get(request)!;
+        proofRun(session, id);
+        const check = session.checks.get(id);
+        if (!check) throw new ApiError(404, 'No verification exists for this proof.');
+        if (check.status !== 'running') return check;
+        const cancelled: ProofCheck = {
+          ...check,
+          ...proofCheckOutcome('cancelled', 'Lean verification was cancelled.'),
+          finishedAt: new Date().toISOString(),
+        };
+        session.checks.set(id, cancelled);
+        proofs.cancel('solo:' + session.id + ':' + id);
+        return cancelled;
       });
     },
     { prefix: '/api/solo' },
