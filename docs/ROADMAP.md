@@ -11,19 +11,16 @@
   CRDT notes, and presence.
 - Broader PDF checks, accessibility, failure handling, usage limits, and a
   distributable extension.
+- Lean-assisted proof walkthroughs from text and region selections, with summaries,
+  tactic steps, observed goals, recursive prerequisites and shared check results.
 
-## Next: Lean-assisted proof breakdowns
+## Proof workspace follow-ups
 
-After the current delivery, add an optional proof workspace that connects a
-paper's claims and proof passages to a Lean 4 development:
+The first proof workspace checks bounded theorem proposals against pinned Lean and
+Mathlib. It exposes assumptions and formalization gaps; a successful check establishes
+the displayed formal statement, not that its translation captures the entire paper.
 
-- Break proofs into named lemmas, dependencies, assumptions, and tactic steps.
-- Link each step back to the paper and explain the purpose of the tactic.
-- Distinguish informal explanation, proposed formalization, and kernel-checked
-  results. Show unresolved goals, missing hypotheses, and admitted steps plainly.
-- Pin Lean and mathlib versions and retain reproducible checking output.
-- Run untrusted proof projects in an isolated worker with resource limits.
-- Share proof discussions and checked artifacts within the reading workspace.
-
-Acceptance requires an end-to-end example from a paper, including a successful
-check and a deliberately incomplete proof that stays visibly unverified.
+- Editable formalizations and explicit revisions with fresh verification results.
+- Multi-lemma developments for paper-specific definitions and larger proofs.
+- Linux/container worker deployment with equivalent isolation and resource controls.
+- Richer mathematical notation and mapping individual goals to locations in the PDF.

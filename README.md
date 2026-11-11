@@ -57,6 +57,19 @@ the same term on the same page reuses its answer during that reading session.
 Definitions also appear in **Ask**, and shared-room definitions remain in the room's
 conversation. Failed delivery can be retried with the original request ID.
 
+## Work through a proof
+
+Highlight a proof, claim, or equation and choose **Break down proof**. The companion's
+**Proofs** view gives a summary, assumptions and individual steps. Expand **Lean
+tactic and goals** to see each proposed tactic and the states observed by Lean.
+Use **Explain** on a prerequisite, or ask about background knowledge in your own
+words, to open another stepwise walkthrough with a link back to its parent.
+
+Lean checks the proposed formal statement automatically when its local runtime is
+ready. A checked statement still needs review against the paper's meaning; missing
+assumptions and formalization gaps stay visible. Shared-room walkthroughs and check
+results persist. See [proof reading and runtime setup](docs/PROOFS.md).
+
 ## Ask Astra while reading solo
 
 Put `OPENAI_API_KEY=...` in `.env` and restart the server. Open a local paper and
@@ -143,8 +156,7 @@ runs remain visibly uncertain rather than being silently charged again.
 
 Scanned PDFs support region selection but not OCR. Paywall integrations, mobile
 layout support, and comprehensive PDF accessibility remain outside this release.
-The next work item is a Lean-assisted tactical proof workspace; see
-[the workpile](docs/ROADMAP.md).
+See [the workpile](docs/ROADMAP.md) for the current proof workspace and follow-ups.
 
 ## Checks and code map
 
@@ -165,6 +177,9 @@ pnpm audit
 - `server/app.ts`, `server/store.ts`: authenticated API and durable shared state.
 - `server/provider.ts`, `server/evidence.ts`: Astra and evidence validation.
 - `server/solo.ts`: local, ephemeral AI sessions without an account.
+- `src/proof.ts`, `src/proof-workspace.tsx`: proof proposals and step navigation.
+- `server/proofs.ts`, `server/lean-runner.ts`: scoped checks and isolated Lean workers.
+- `lean/`, `scripts/setup-lean.mjs`: pinned Lean/Mathlib project and runtime setup.
 - `server/pdf-import.ts`, `server/pdf-worker.ts`: bounded PDF extraction.
 - `extension/`: packaged reader, native panel and validated active-tab messaging.
 
