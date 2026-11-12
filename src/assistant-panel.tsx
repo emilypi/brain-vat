@@ -40,6 +40,7 @@ interface AssistantPanelProps {
   onCloseDefinition?: () => void;
   onDefine?: (anchor: Anchor) => void;
   proofTarget?: ProofTarget | null;
+  selectionTarget?: Anchor | null;
 }
 
 function submitOnEnter(
@@ -69,6 +70,7 @@ function LocalAssistantPanel({
   onCloseDefinition,
   onDefine,
   proofTarget,
+  selectionTarget,
 }: AssistantPanelProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -188,6 +190,12 @@ function LocalAssistantPanel({
     const element = conversation.current;
     if (element) element.scrollTop = element.scrollHeight;
   }, [runs.length, finishedCount]);
+
+  useEffect(() => {
+    if (!selectionTarget) return;
+    setProofOpen(false);
+    if (conversation.current) conversation.current.scrollTop = 0;
+  }, [selectionTarget]);
 
   const ask = useCallback(
     async (
@@ -396,9 +404,7 @@ function LocalAssistantPanel({
               </div>
               {selection ? (
                 <>
-                  <p className="selection-quote">
-                    {selection.quote || 'Selected equation or figure region'}
-                  </p>
+                  <SelectionPreview selection={selection} pdfDocument={pdfDocument} />
                   <div className="selection-actions">
                     <button
                       className="text-button"
@@ -676,8 +682,13 @@ function LocalAssistantPanel({
 }
 
 /** Render only the selected region, bounded independently of the PDF page size. */
-async function captureRegion(pdf: PDFDocumentProxy, anchor: Anchor): Promise<string> {
+async function captureRegion(
+  pdf: PDFDocumentProxy,
+  anchor: Anchor,
+  signal?: AbortSignal,
+): Promise<string> {
   const page = await pdf.getPage(anchor.pageIndex + 1);
+  signal?.throwIfAborted();
   const original = page.getViewport({ scale: 1 });
   const box = page.view as unknown as PageBox;
   const points = anchor.quads
@@ -696,22 +707,83 @@ async function captureRegion(pdf: PDFDocumentProxy, anchor: Anchor): Promise<str
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(width * scale));
   canvas.height = Math.max(1, Math.ceil(height * scale));
+  let cancel: (() => void) | undefined;
   try {
-    await page.render({
+    const render = page.render({
       canvas,
       viewport: page.getViewport({ scale }),
       transform: [1, 0, 0, 1, -left * scale, -top * scale],
       background: '#ffffff',
-    }).promise;
+    });
+    cancel = () => render.cancel();
+    signal?.addEventListener('abort', cancel, { once: true });
+    await render.promise;
+    signal?.throwIfAborted();
     const image = canvas.toDataURL('image/png');
     if (image.length > 3_000_000) {
       throw new Error('This region is too detailed. Select a smaller area and retry.');
     }
     return image;
   } finally {
+    if (cancel) signal?.removeEventListener('abort', cancel);
     canvas.width = 0;
     canvas.height = 0;
   }
+}
+
+function SelectionPreview({
+  selection,
+  pdfDocument,
+}: {
+  selection: Anchor;
+  pdfDocument: PDFDocumentProxy | null | undefined;
+}): React.JSX.Element {
+  const [preview, setPreview] = useState<{
+    anchor: Anchor;
+    pdf: PDFDocumentProxy;
+    image: string | null;
+    error: string;
+  } | null>(null);
+  const current =
+    preview?.anchor === selection && preview.pdf === pdfDocument ? preview : null;
+
+  useEffect(() => {
+    if (selection.kind !== 'region' || !pdfDocument) return;
+    const controller = new AbortController();
+    void captureRegion(pdfDocument, selection, controller.signal)
+      .then((image) => {
+        if (!controller.signal.aborted)
+          setPreview({ anchor: selection, pdf: pdfDocument, image, error: '' });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setPreview({
+            anchor: selection,
+            pdf: pdfDocument,
+            image: null,
+            error: 'Could not preview this area. Try selecting a smaller region.',
+          });
+      });
+    return () => controller.abort();
+  }, [selection, pdfDocument]);
+
+  if (selection.kind === 'text' || !pdfDocument)
+    return (
+      <p className="selection-quote">
+        {selection.quote || 'Selected equation or figure region'}
+      </p>
+    );
+  return current?.image ? (
+    <img
+      className="selection-region-preview"
+      src={current.image}
+      alt={`Selected region from page ${selection.pageIndex + 1}`}
+    />
+  ) : (
+    <p className="muted" role="status">
+      {current?.error || 'Preparing selection preview…'}
+    </p>
+  );
 }
 
 interface SharedAssistantProps extends AssistantPanelProps {
@@ -797,6 +869,7 @@ function SharedAssistantPanel({
   onCloseDefinition,
   onDefine,
   proofTarget,
+  selectionTarget,
 }: SharedAssistantProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'ask' | 'discuss'>('ask');
@@ -826,6 +899,13 @@ function SharedAssistantPanel({
   const roomId = room.state.room.id;
   const documentId = context.documentId;
   const selection = context.selection;
+  const conversation = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!selectionTarget) return;
+    setProofOpen(false);
+    if (conversation.current) conversation.current.scrollTop = 0;
+  }, [selectionTarget]);
 
   useEffect(() => {
     const current = ++generation.current;
@@ -1106,7 +1186,7 @@ function SharedAssistantPanel({
           </button>
         </div>
       </header>
-      <div className="panel-scroll" hidden={proofOpen}>
+      <div className="panel-scroll" ref={conversation} hidden={proofOpen}>
         <div className="mode-note">
           <Sparkles size={15} />
           {status?.configured
@@ -1123,11 +1203,13 @@ function SharedAssistantPanel({
           <div className="section-label">
             <Quote size={14} /> YOUR SELECTION
           </div>
-          <p className={selection ? 'selection-quote' : 'muted'}>
-            {selection
-              ? selection.quote || 'Selected equation or figure region'
-              : 'Select text or draw a region to include it with your question.'}
-          </p>
+          {selection ? (
+            <SelectionPreview selection={selection} pdfDocument={pdfDocument} />
+          ) : (
+            <p className="muted">
+              Select text or draw a region to include it with your question.
+            </p>
+          )}
           {selection && (
             <div className="selection-actions">
               <button

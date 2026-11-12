@@ -103,6 +103,7 @@ test('inline definitions preserve reading, label origins and reuse answers', asy
   await openPaper(page, context);
   await page.getByRole('button', { name: 'Highlight tool' }).click();
   await selectWord(page);
+  await page.getByRole('button', { name: 'Close reading companion' }).click();
   expect(inputs).toHaveLength(0);
   await page.getByRole('button', { name: 'Define selected text' }).click();
   const card = page.getByRole('dialog', { name: 'precise', exact: true });

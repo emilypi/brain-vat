@@ -95,7 +95,9 @@ test('region capture saves independently of selectable text', async ({ page }) =
   await page.mouse.down();
   await page.mouse.move(bounds.x + 300, bounds.y + 160, { steps: 10 });
   await page.mouse.up();
-  await expect(page.getByText('Selected equation or figure region')).toBeVisible();
+  await expect(
+    page.getByRole('img', { name: 'Selected region from page 1' }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Save highlight' }).click();
   await expect(page.getByRole('status')).toHaveText('Highlight saved on this device.');
   await page.reload();

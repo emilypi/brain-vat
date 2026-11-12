@@ -280,12 +280,23 @@ test('walk through a proof, expand prerequisites recursively and return', async 
   expect(inputs[3]?.question).toBe('Why can we project a pair?');
   await page.getByRole('button', { name: 'Conversation', exact: true }).click();
   await page
+    .getByRole('textbox', { name: 'Ask about this paper' })
+    .fill('Keep my draft');
+  await page
     .getByRole('button', { name: 'Open proof walkthrough', exact: true })
     .first()
     .click();
   await expect(
     workspace.getByRole('heading', { name: 'Conjunction symmetry' }),
   ).toBeVisible();
+  expect(inputs).toHaveLength(4);
+  await page.getByRole('button', { name: 'Move selection box' }).press('ArrowRight');
+  await expect(page.locator('.selection-quote')).toBeVisible();
+  await expect(page.locator('.selection-quote')).toHaveText('precise');
+  await expect(workspace).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Ask about this paper' })).toHaveValue(
+    'Keep my draft',
+  );
   expect(inputs).toHaveLength(4);
 });
 
