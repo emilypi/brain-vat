@@ -118,7 +118,7 @@ export function ReaderApp({
   const libraryPanel = useRef<HTMLElement>(null);
   const companionToggle = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const pdf = usePdf(paper);
+  const pdf = usePdf(paper, enhanced);
   const openGeneration = useRef(0);
 
   useEffect(() => {
@@ -136,18 +136,11 @@ export function ReaderApp({
     async (next: Paper): Promise<void> => {
       const generation = ++openGeneration.current;
       setError('');
-      setPaper(null);
+      setPaper(next);
       setSelection(null);
       setHighlights([]);
       setRoomId(null);
-      const saved = await listHighlights(next.id);
-      if (generation !== openGeneration.current) return;
       const nextSession = crypto.randomUUID();
-      await environment.clear(nextSession);
-      if (generation !== openGeneration.current) return;
-      setPaper(next);
-      setHighlights(saved);
-      setSelection(null);
       setNotice('');
       navigateToPage(0);
       setRotation(0);
@@ -157,6 +150,16 @@ export function ReaderApp({
       const target = new URL(location.href);
       target.hash = 'doc=' + next.id;
       history.replaceState(null, '', target);
+      // Mount the reader before restoring annotations and the extension bridge.
+      const [saved] = await Promise.all([
+        listHighlights(next.id),
+        environment.clear(nextSession),
+      ]);
+      if (generation !== openGeneration.current) return;
+      setHighlights((current) => [
+        ...saved.filter((item) => !current.some((entry) => entry.id === item.id)),
+        ...current,
+      ]);
     },
     [environment, navigateToPage],
   );
@@ -324,10 +327,9 @@ export function ReaderApp({
     const next = await createPaper(bytes, filename, source);
     if (next.id === EXAMPLE_HASH) next.title = 'Vectorizing Recurrences over Semirings';
     const existing = await getPaper(next.id);
-    await savePaper(existing ?? next);
-    setLibrary(await listPapers());
-    await openPaper(existing ?? next);
+    await Promise.all([openPaper(existing ?? next), savePaper(existing ?? next)]);
     setShowImport(false);
+    setLibrary(await listPapers());
   };
 
   const runImport = async (task: () => Promise<void>): Promise<void> => {
@@ -676,6 +678,7 @@ export function ReaderApp({
                 pageIndex={pageIndex}
                 navigation={navigation}
                 onVisiblePage={setPageIndex}
+                onPageReady={pdf.onPageReady}
                 scale={scale}
                 showSources={showSources}
                 rotation={rotation}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -14,7 +14,15 @@ export interface PdfState {
   error: string | null;
 }
 
-export function usePdf(paper: Paper | null): PdfState {
+interface PdfReaderState extends PdfState {
+  onPageReady: (document: PDFDocumentProxy) => void;
+}
+
+export function usePdf(paper: Paper | null, enhanced = false): PdfReaderState {
+  const [readyDocument, setReadyDocument] = useState<PDFDocumentProxy | null>(null);
+  const onPageReady = useCallback((document: PDFDocumentProxy) => {
+    setReadyDocument(document);
+  }, []);
   const [state, setState] = useState<PdfState>({
     documentId: null,
     document: null,
@@ -25,6 +33,7 @@ export function usePdf(paper: Paper | null): PdfState {
   const bytes = paper?.bytes;
   const documentId = paper?.id ?? null;
   useEffect(() => {
+    setReadyDocument(null);
     if (!bytes) {
       setState({ documentId, document: null, pages: [], indexing: false, error: null });
       return;
@@ -41,24 +50,9 @@ export function usePdf(paper: Paper | null): PdfState {
     });
     setState({ documentId, document: null, pages: [], indexing: true, error: null });
     void task.promise
-      .then(async (document) => {
+      .then((document) => {
         if (cancelled) return;
         setState({ documentId, document, pages: [], indexing: true, error: null });
-        const pages: PaperPassage[] = [];
-        for (let index = 0; index < document.numPages; index += 1) {
-          if (cancelled) return;
-          const page = await document.getPage(index + 1);
-          const content = await page.getTextContent();
-          const text = content.items
-            .map((item) => ('str' in item ? item.str : ''))
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          pages.push({ pageIndex: index, text });
-        }
-        if (!cancelled) {
-          setState({ documentId, document, pages, indexing: false, error: null });
-        }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -74,15 +68,62 @@ export function usePdf(paper: Paper | null): PdfState {
       void task.destroy();
     };
   }, [bytes, documentId]);
-  return state.documentId === documentId
-    ? state
-    : {
-        documentId,
-        document: null,
-        pages: [],
-        indexing: Boolean(bytes),
-        error: null,
-      };
+
+  const document = state.documentId === documentId ? state.document : null;
+  // Enhanced mode needs extracted text itself; otherwise let the visible PDF win.
+  const canIndex = Boolean(document && (readyDocument === document || enhanced));
+  useEffect(() => {
+    if (!document || !canIndex) return;
+    let cancelled = false;
+    void (async () => {
+      const pages: PaperPassage[] = [];
+      for (let index = 0; index < document.numPages; index += 1) {
+        if (cancelled) return;
+        const page = await document.getPage(index + 1);
+        if (cancelled) return;
+        const content = await page.getTextContent();
+        if (cancelled) return;
+        const text = content.items
+          .map((item) => ('str' in item ? item.str : ''))
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        pages.push({ pageIndex: index, text });
+      }
+      setState((current) =>
+        current.document === document
+          ? { ...current, pages, indexing: false }
+          : current,
+      );
+    })().catch((reason: unknown) => {
+      if (!cancelled) {
+        setState((current) =>
+          current.document === document
+            ? {
+                ...current,
+                indexing: false,
+                error: reason instanceof Error ? reason.message : 'Indexing failed.',
+              }
+            : current,
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [document, canIndex]);
+
+  const current =
+    state.documentId === documentId
+      ? state
+      : {
+          documentId,
+          document: null,
+          pages: [],
+          indexing: Boolean(bytes),
+          error: null,
+        };
+  return { ...current, onPageReady };
 }
 
 export async function destinationPage(

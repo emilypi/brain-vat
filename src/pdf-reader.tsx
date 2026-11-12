@@ -31,6 +31,7 @@ interface PdfReaderProps {
   onDefine: (anchor: Anchor) => void;
   onNavigate: (pageIndex: number) => void;
   onVisiblePage: (pageIndex: number) => void;
+  onPageReady: (document: PDFDocumentProxy) => void;
 }
 
 interface PageSize {
@@ -41,6 +42,30 @@ interface PageSize {
 interface PageLayout extends PageSize {
   top: number;
   pageIndex: number;
+}
+
+/** Show the first page immediately; refine later page geometry in the background. */
+export async function loadPageSizes(
+  document: Pick<PDFDocumentProxy, 'numPages' | 'getPage'>,
+  onSizes: (sizes: PageSize[]) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const sizes: PageSize[] = [];
+  for (let index = 0; index < document.numPages; index += 1) {
+    if (signal.aborted) return;
+    const page = await document.getPage(index + 1);
+    if (signal.aborted) return;
+    const { width, height } = page.getViewport({ scale: 1 });
+    const size = { width, height };
+    if (index === 0) {
+      // Reserve the whole scroll range before the remaining pages are decoded.
+      sizes.push(...Array.from({ length: document.numPages }, () => size));
+      onSizes([...sizes]);
+    } else if (sizes[index]?.width !== width || sizes[index]?.height !== height) {
+      sizes[index] = size;
+      onSizes([...sizes]);
+    }
+  }
 }
 
 /** Keep page geometry in the flow, but only rasterize near the reading position. */
@@ -59,6 +84,7 @@ export function PdfReader({
   onDefine,
   onNavigate,
   onVisiblePage,
+  onPageReady,
 }: PdfReaderProps): React.JSX.Element {
   const stage = useRef<HTMLDivElement>(null);
   const [sizes, setSizes] = useState<PageSize[]>([]);
@@ -69,24 +95,17 @@ export function PdfReader({
   const lastNavigation = useRef<PageNavigation | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const next: PageSize[] = [];
-      for (let index = 0; index < document.numPages; index += 1) {
-        const page = await document.getPage(index + 1);
-        if (cancelled) return;
-        const size = page.getViewport({ scale: 1 });
-        next.push({ width: size.width, height: size.height });
-      }
-      if (!cancelled) setSizes(next);
-    })().catch((reason: unknown) => {
-      if (!cancelled)
-        setError(
-          reason instanceof Error ? reason.message : 'Unable to lay out the PDF.',
-        );
-    });
+    const controller = new AbortController();
+    void loadPageSizes(document, setSizes, controller.signal).catch(
+      (reason: unknown) => {
+        if (!controller.signal.aborted)
+          setError(
+            reason instanceof Error ? reason.message : 'Unable to lay out the PDF.',
+          );
+      },
+    );
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [document]);
 
@@ -225,6 +244,7 @@ export function PdfReader({
                   onSelect={onSelect}
                   onDefine={onDefine}
                   onNavigate={onNavigate}
+                  onPageReady={onPageReady}
                 />
               ) : (
                 <span className="page-placeholder">Page {item.pageIndex + 1}</span>

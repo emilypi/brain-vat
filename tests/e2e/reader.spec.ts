@@ -19,6 +19,8 @@ async function selectTitle(page: Page): Promise<void> {
     })
     .first();
   await expect(text).toBeVisible();
+  // Coordinate-based dragging needs the Ask drawer's layout motion to settle.
+  await text.click({ trial: true });
   const box = await text.boundingBox();
   if (!box) throw new Error('PDF title has no text bounds.');
   await page.mouse.move(box.x + 2, box.y + box.height / 2);

@@ -23,6 +23,7 @@ interface PdfPageProps {
   onSelect: (anchor: Anchor | null) => void;
   onDefine: (anchor: Anchor) => void;
   onNavigate?: (pageIndex: number) => void;
+  onPageReady: (document: PDFDocumentProxy) => void;
 }
 
 interface SourceOverlay {
@@ -57,6 +58,7 @@ export function PdfPage({
   onSelect,
   onDefine,
   onNavigate,
+  onPageReady,
 }: PdfPageProps): React.JSX.Element {
   const canvas = useRef<HTMLCanvasElement>(null);
   const textContainer = useRef<HTMLDivElement>(null);
@@ -66,6 +68,19 @@ export function PdfPage({
   const [error, setError] = useState<string | null>(null);
   const [sourceLinks, setSourceLinks] = useState<SourceOverlay[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ready || !active) return;
+    // Leave a paint opportunity before starting work for the rest of the paper.
+    let nextFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      nextFrame = requestAnimationFrame(() => onPageReady(document));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(nextFrame);
+    };
+  }, [ready, active, document, onPageReady]);
 
   useEffect(() => {
     let cancelled = false;

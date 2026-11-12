@@ -162,6 +162,8 @@ test('adjust scanned-page areas and retain the box after rotation', async ({
   await expect(preview).toBeVisible();
   const originalPreview = await preview.getAttribute('src');
   const handle = page.getByRole('button', { name: 'Resize selection bottom right' });
+  // Selecting the area opens Ask; wait before measuring the moving handle.
+  await handle.click({ trial: true });
   const point = await handle.boundingBox();
   if (!point) throw Error('Missing resize handle');
   await page.mouse.move(point.x + point.width / 2, point.y + point.height / 2);
