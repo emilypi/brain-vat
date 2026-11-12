@@ -1,4 +1,5 @@
 import type { ProviderInput, SourceEvidence } from '../src/workspace-contract.ts';
+import { safeExternalUrl } from '../src/source-links.ts';
 
 const PASSAGE_CHARS = 2400;
 const PAPER_CHARS = 60_000;
@@ -10,21 +11,6 @@ export interface SearchCitation {
   text: string;
   startIndex: number;
   endIndex: number;
-}
-
-/** Links are displayed to readers, never fetched by this module. */
-export function safeSourceUrl(raw: string): string | null {
-  if (raw.length > 2048) return null;
-  if ([...raw].some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127))
-    return null;
-  try {
-    const url = new URL(raw);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
-      return null;
-    return url.href;
-  } catch {
-    return null;
-  }
 }
 
 function trimReference(raw: string): string {
@@ -52,7 +38,9 @@ function bibliography(pages: ProviderInput['pages']): SourceEvidence[] {
     const links = text.matchAll(new RegExp(pattern, 'gi'));
     for (const match of links) {
       const raw = trimReference(match[0]);
-      const url = safeSourceUrl(raw.startsWith('10.') ? 'https://doi.org/' + raw : raw);
+      const url = safeExternalUrl(
+        raw.startsWith('10.') ? 'https://doi.org/' + raw : raw,
+      );
       if (!url || seen.has(url)) continue;
       seen.add(url);
       const index = match.index;
@@ -153,7 +141,7 @@ export function buildExternalEvidence(citations: SearchCitation[]): SourceEviden
   const evidence: SourceEvidence[] = [];
   const seen = new Set<string>();
   for (const citation of citations) {
-    const url = safeSourceUrl(citation.url);
+    const url = safeExternalUrl(citation.url);
     if (
       !url ||
       seen.has(url) ||

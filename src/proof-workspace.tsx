@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, CornerUpRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronRight, CornerUpRight } from 'lucide-react';
 import { EvidenceCard } from './enhanced-reader';
+import { LeanCode } from './lean-code';
 import { renderLeanProof } from './proof';
 import type { LeanStatus, ProofCheck, ProofParent } from './proof';
 import type { AiRun } from './workspace-contract';
@@ -40,6 +41,7 @@ interface ProofWorkspaceProps {
   onRequest: (request: ProofRequest) => void;
   onOpen: (runId: string) => void;
   onNavigate: (pageIndex: number) => void;
+  onLocate?: ((anchor: Anchor | null) => void) | undefined;
   onCancel: (run: AiRun) => void;
   onRetry: () => void;
 }
@@ -69,10 +71,13 @@ export function ProofWorkspace({
   onRequest,
   onOpen,
   onNavigate,
+  onLocate,
   onCancel,
   onRetry,
 }: ProofWorkspaceProps): React.JSX.Element {
-  const [stepIndex, setStepIndex] = useState(0);
+  const [stepIndex, setStepIndex] = useState<number | null>(null);
+  const positions = useRef<Record<string, number | null>>({});
+  const workspace = useRef<HTMLElement>(null);
   const [question, setQuestion] = useState('');
   const [storedCheck, setCheck] = useState<ProofCheck | null>(null);
   const [checkError, setCheckError] = useState('');
@@ -90,7 +95,7 @@ export function ProofWorkspace({
       : null;
   const path = runId ? `${basePath}/runs/${runId}/proof-check` : null;
   const proofRuns = runs.filter((item) => item.kind === 'proof');
-  const activeStep = proof?.steps[stepIndex];
+  const activeStep = stepIndex === null ? null : proof?.steps[stepIndex];
   const goals = check?.steps.find((item) => item.stepId === activeStep?.id);
   const source =
     artifact?.renderedSource !== undefined
@@ -110,11 +115,20 @@ export function ProofWorkspace({
   const parent = artifact?.parent;
   const parentRun = parent ? runs.find((item) => item.id === parent.runId) : null;
   const heading = useRef<HTMLHeadingElement>(null);
+  const outlineHeading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    setStepIndex(0);
+    setStepIndex(runId ? (positions.current[runId] ?? null) : null);
     setQuestion('');
   }, [runId]);
+
+  useEffect(() => {
+    if (workspace.current) workspace.current.scrollTop = 0;
+    const target = stepIndex === null ? outlineHeading.current : heading.current;
+    target?.focus({ preventScroll: true });
+  }, [runId, stepIndex]);
+
+  useEffect(() => () => onLocate?.(null), [runId, onLocate]);
 
   useEffect(() => {
     const current = ++generation.current;
@@ -204,44 +218,51 @@ export function ProofWorkspace({
       });
   };
 
-  const moveStep = (index: number): void => {
+  const moveStep = (index: number | null): void => {
+    if (runId) positions.current[runId] = index;
     setStepIndex(index);
-    heading.current?.focus({ preventScroll: true });
   };
 
   return (
-    <section className="proof-workspace" aria-label="Proof workspace">
+    <section
+      ref={workspace}
+      className={'proof-workspace' + (activeStep ? ' proof-focused' : '')}
+      aria-label="Proof workspace"
+    >
       <div className="proof-navigation">
         {parentRun && (
           <button className="text-button" onClick={() => onOpen(parentRun.id)}>
             <ArrowLeft size={14} /> Back to parent proof
           </button>
         )}
-        {proofRuns.length > 0 && (
-          <label>
-            <span className="sr-only">Proof history</span>
-            <select
-              value={runId ?? ''}
-              onChange={(event) => onOpen(event.target.value)}
+        <details className="proof-history" key={runId} hidden={Boolean(activeStep)}>
+          <summary>Walkthroughs &amp; selection</summary>
+          {proofRuns.length > 0 && (
+            <label>
+              <span className="sr-only">Proof history</span>
+              <select
+                value={runId ?? ''}
+                onChange={(event) => onOpen(event.target.value)}
+              >
+                {!runId && <option value="">Choose a walkthrough</option>}
+                {proofRuns.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.answer?.proof?.title ?? item.question.slice(0, 100)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {selection && (
+            <button
+              className="text-button"
+              disabled={disabled}
+              onClick={() => onRequest({ question: PROOF_QUESTION, selection })}
             >
-              {!runId && <option value="">Choose a walkthrough</option>}
-              {proofRuns.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.answer?.proof?.title ?? item.question.slice(0, 100)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {selection && (
-          <button
-            className="text-button"
-            disabled={disabled}
-            onClick={() => onRequest({ question: PROOF_QUESTION, selection })}
-          >
-            {run ? 'Break down current selection' : 'Break down proof'}
-          </button>
-        )}
+              {run ? 'Break down current selection' : 'Break down proof'}
+            </button>
+          )}
+        </details>
       </div>
       {error && (
         <p className="research-error" role="alert">
@@ -291,20 +312,58 @@ export function ProofWorkspace({
       {proof && answer && run && (
         <>
           <header className="proof-summary">
-            <div className="section-label">PROOF WALKTHROUGH</div>
+            <div className="section-label">
+              {activeStep ? 'PROOF OF' : 'PROOF WALKTHROUGH'}
+            </div>
             <h2>{proof.title}</h2>
-            <p>{proof.summary}</p>
+            {!activeStep && <p>{proof.summary}</p>}
             {artifact?.sourceAnchor && (
               <button
                 className="citation"
-                onClick={() => onNavigate(artifact.sourceAnchor!.pageIndex)}
+                onClick={() => {
+                  if (onLocate) onLocate(artifact.sourceAnchor!);
+                  else onNavigate(artifact.sourceAnchor!.pageIndex);
+                }}
               >
                 Highlighted passage · page {artifact.sourceAnchor.pageIndex + 1}
                 <CornerUpRight size={13} />
               </button>
             )}
+            <div
+              className={'proof-status proof-status-' + (check?.status ?? 'proposed')}
+              role="status"
+            >
+              {check ? checkLabels[check.status] : 'Proposed · not checked'}
+            </div>
           </header>
-          <details className="proof-context">
+          {!activeStep && (
+            <nav className="proof-outline" aria-label="Proof outline">
+              <div className="proof-outline-heading">
+                <h3 ref={outlineHeading} tabIndex={-1}>
+                  The argument
+                </h3>
+                <span>{proof.steps.length} steps · choose one to explore</span>
+              </div>
+              <ol>
+                {proof.steps.map((step, index) => (
+                  <li key={step.id}>
+                    <button
+                      aria-label={`Step ${index + 1}: ${step.title}`}
+                      onClick={() => moveStep(index)}
+                    >
+                      <span className="proof-step-number">{index + 1}</span>
+                      <span className="proof-outline-copy">
+                        <strong>{step.title}</strong>
+                        <span>{step.explanation}</span>
+                      </span>
+                      <ChevronRight size={15} />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          )}
+          <details className="proof-context" hidden={Boolean(activeStep)}>
             <summary>Claim, interpretation and assumptions</summary>
             <h3>Claim</h3>
             <p>{proof.claim}</p>
@@ -328,13 +387,11 @@ export function ProofWorkspace({
             {proof.statement && (
               <>
                 <h3>Proposed formal statement</h3>
-                <pre>
-                  <code>{proof.statement}</code>
-                </pre>
+                <LeanCode code={proof.statement} />
               </>
             )}
           </details>
-          {proof.gaps.length > 0 && (
+          {proof.gaps.length > 0 && !activeStep && (
             <section className="proof-gaps" aria-label="Formalization gaps">
               <h3>What is still missing</h3>
               <ul>
@@ -344,28 +401,124 @@ export function ProofWorkspace({
               </ul>
             </section>
           )}
+          {activeStep && stepIndex !== null && (
+            <section className="proof-step" aria-label="Current proof step">
+              <nav className="proof-step-controls" aria-label="Proof steps">
+                <button className="text-button" onClick={() => moveStep(null)}>
+                  <ArrowLeft size={14} /> Proof outline
+                </button>
+                <span className="proof-step-count">
+                  {stepIndex + 1} of {proof.steps.length}
+                </span>
+                <button
+                  className="icon-button"
+                  aria-label="Previous proof step"
+                  disabled={stepIndex === 0}
+                  onClick={() => moveStep(stepIndex - 1)}
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Next proof step"
+                  disabled={stepIndex === proof.steps.length - 1}
+                  onClick={() => moveStep(stepIndex + 1)}
+                >
+                  <ArrowRight size={16} />
+                </button>
+              </nav>
+              <h3
+                ref={heading}
+                tabIndex={-1}
+                aria-label={`${stepIndex + 1}. ${activeStep.title}`}
+              >
+                <span className="proof-step-number" aria-hidden="true">
+                  {stepIndex + 1}
+                </span>
+                {activeStep.title}
+              </h3>
+              <p>{activeStep.explanation}</p>
+              <details className="proof-lean-detail">
+                <summary>Lean tactic and goals</summary>
+                <h4>Tactic proposal</h4>
+                <LeanCode
+                  code={activeStep.tactic ?? 'sorry -- not formalized'}
+                  firstLine={
+                    (source?.steps.find((step) => step.stepId === activeStep.id)
+                      ?.startLine ?? 0) + 1
+                  }
+                />
+                {goals ? (
+                  <>
+                    <h4>Before · observed by Lean</h4>
+                    <pre>
+                      {goals.before.join('\n\n') || 'No goals at this position.'}
+                    </pre>
+                    <h4>After · observed by Lean</h4>
+                    <pre>
+                      {goals.after.join('\n\n') || 'No goals at this position.'}
+                    </pre>
+                    <p className="metadata-label">
+                      Closing one focused goal does not establish the whole proof.
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted">{missingGoalsMessage}</p>
+                )}
+              </details>
+              {activeStep.evidenceIds.length > 0 && (
+                <details>
+                  <summary>Step sources ({activeStep.evidenceIds.length})</summary>
+                  {activeStep.evidenceIds.map((id) => {
+                    const source = answer.evidence.find((item) => item.id === id);
+                    return source ? (
+                      <EvidenceCard key={id} source={source} onNavigate={onNavigate} />
+                    ) : null;
+                  })}
+                </details>
+              )}
+              {activeStep.prerequisiteIds.length > 0 && (
+                <div className="proof-step-needs">
+                  <span className="section-label">THIS STEP USES</span>
+                  {activeStep.prerequisiteIds.map((id) => {
+                    const prerequisite = proof.prerequisites.find(
+                      (item) => item.id === id,
+                    );
+                    return prerequisite ? (
+                      <button
+                        key={id}
+                        className="text-button"
+                        disabled={disabled}
+                        onClick={() => expand(id)}
+                      >
+                        Explain {prerequisite.title}
+                        <ArrowRight size={13} />
+                      </button>
+                    ) : null;
+                  })}
+                </div>
+              )}
+            </section>
+          )}
           <section className="proof-verification" aria-label="Lean verification">
-            <div
-              className={'proof-status proof-status-' + (check?.status ?? 'proposed')}
-              role="status"
-            >
-              {check ? checkLabels[check.status] : 'Proposed · not checked'}
-            </div>
-            {check && <p>{check.message}</p>}
-            {check?.status === 'checked' && (
-              <p className="metadata-label">
-                Lean checked this formal statement. Its correspondence to the paper
-                still needs review.
-              </p>
-            )}
-            {check && artifact?.renderedSource === undefined && (
-              <p className="metadata-label">
-                This older result did not save its exact Lean source. The code below is
-                reconstructed; the recorded check applies to its original source hash
-                and toolchain versions.
-              </p>
-            )}
-            {terminalCheck && (
+            <details className="proof-verification-detail">
+              <summary>About this check</summary>
+              {check && <p>{check.message}</p>}
+              {check?.status === 'checked' && (
+                <p className="metadata-label">
+                  Lean checked this formal statement. Its correspondence to the paper
+                  still needs review.
+                </p>
+              )}
+              {check && artifact?.renderedSource === undefined && (
+                <p className="metadata-label">
+                  This older result did not save its exact Lean source. The code below
+                  is reconstructed; the recorded check applies to its original source
+                  hash and toolchain versions.
+                </p>
+              )}
+            </details>
+            {terminalCheck && check.status !== 'checked' && (
               <p className="metadata-label">
                 Create a new walkthrough to revise this proof.
               </p>
@@ -429,104 +582,9 @@ export function ProofWorkspace({
               </details>
             )}
           </section>
-          {activeStep && (
-            <section className="proof-step" aria-label="Current proof step">
-              <nav className="proof-step-controls" aria-label="Proof steps">
-                <button
-                  className="icon-button"
-                  aria-label="Previous proof step"
-                  disabled={stepIndex === 0}
-                  onClick={() => moveStep(stepIndex - 1)}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <label>
-                  <span className="sr-only">Proof step</span>
-                  <select
-                    value={stepIndex}
-                    onChange={(event) => moveStep(Number(event.target.value))}
-                  >
-                    {proof.steps.map((step, index) => (
-                      <option key={step.id} value={index}>
-                        {index + 1} / {proof.steps.length} · {step.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="icon-button"
-                  aria-label="Next proof step"
-                  disabled={stepIndex === proof.steps.length - 1}
-                  onClick={() => moveStep(stepIndex + 1)}
-                >
-                  <ArrowRight size={16} />
-                </button>
-              </nav>
-              <h3 ref={heading} tabIndex={-1}>
-                {stepIndex + 1}. {activeStep.title}
-              </h3>
-              <p>{activeStep.explanation}</p>
-              <details className="proof-lean-detail">
-                <summary>Lean tactic and goals</summary>
-                <h4>Tactic proposal</h4>
-                <pre>
-                  <code>{activeStep.tactic ?? 'sorry -- not formalized'}</code>
-                </pre>
-                {goals ? (
-                  <>
-                    <h4>Before · observed by Lean</h4>
-                    <pre>
-                      {goals.before.join('\n\n') || 'No goals at this position.'}
-                    </pre>
-                    <h4>After · observed by Lean</h4>
-                    <pre>
-                      {goals.after.join('\n\n') || 'No goals at this position.'}
-                    </pre>
-                    <p className="metadata-label">
-                      Closing one focused goal does not establish the whole proof.
-                    </p>
-                  </>
-                ) : (
-                  <p className="muted">{missingGoalsMessage}</p>
-                )}
-              </details>
-              {activeStep.evidenceIds.length > 0 && (
-                <details>
-                  <summary>Step sources ({activeStep.evidenceIds.length})</summary>
-                  {activeStep.evidenceIds.map((id) => {
-                    const source = answer.evidence.find((item) => item.id === id);
-                    return source ? (
-                      <EvidenceCard key={id} source={source} onNavigate={onNavigate} />
-                    ) : null;
-                  })}
-                </details>
-              )}
-              {activeStep.prerequisiteIds.length > 0 && (
-                <div className="proof-step-needs">
-                  <span className="section-label">THIS STEP USES</span>
-                  {activeStep.prerequisiteIds.map((id) => {
-                    const prerequisite = proof.prerequisites.find(
-                      (item) => item.id === id,
-                    );
-                    return prerequisite ? (
-                      <button
-                        key={id}
-                        className="text-button"
-                        disabled={disabled}
-                        onClick={() => expand(id)}
-                      >
-                        Explain {prerequisite.title}
-                        <ArrowRight size={13} />
-                      </button>
-                    ) : null;
-                  })}
-                </div>
-              )}
-            </section>
-          )}
-          {proof.prerequisites.length > 0 && (
-            <details className="proof-prerequisites">
-              <summary>Prerequisites ({proof.prerequisites.length})</summary>
+          {proof.prerequisites.length > 0 && !activeStep && (
+            <section className="proof-prerequisites" aria-label="Prerequisites">
+              <h3>Background to explore</h3>
               {proof.prerequisites.map((item) => (
                 <article key={item.id}>
                   <h3>{item.title}</h3>
@@ -536,18 +594,16 @@ export function ProofWorkspace({
                     disabled={disabled}
                     onClick={() => expand(item.id)}
                   >
-                    Walk through {item.title}
+                    Explain {item.title} <ChevronRight size={14} />
                   </button>
                 </article>
               ))}
-            </details>
+            </section>
           )}
           {source && (
             <details className="proof-source">
               <summary>Complete Lean proposal</summary>
-              <pre>
-                <code>{source.code}</code>
-              </pre>
+              <LeanCode code={source.code} />
               {!artifact?.parent && artifact?.sourceAnchor && (
                 <button
                   className="text-button"

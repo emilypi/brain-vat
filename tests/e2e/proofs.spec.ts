@@ -217,7 +217,21 @@ test('walk through a proof, expand prerequisites recursively and return', async 
   ).toHaveCount(0);
   expect(inputs[0]?.kind).toBe('proof');
   expect(inputs[0]?.selection?.quote).toBe('precise');
+  const outline = workspace.getByRole('navigation', { name: 'Proof outline' });
+  await expect(outline.getByRole('button')).toHaveCount(2);
+  await expect(
+    workspace.getByRole('region', { name: 'Current proof step' }),
+  ).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/proof-inspector-outline-light.png' });
+  await workspace.getByRole('button', { name: 'Highlighted passage · page 1' }).click();
+  await expect(page.getByTestId('inspected-highlight')).toHaveCount(1);
+  await outline.getByRole('button', { name: 'Step 1: Name the assumptions' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    workspace.getByRole('heading', { name: '1. Name the assumptions' }),
+  ).toBeFocused();
   await workspace.getByText('Lean tactic and goals', { exact: true }).click();
+  await expect(workspace.locator('.lean-keyword').first()).toHaveText('intro');
   await expect(
     workspace.getByText('P Q : Prop\nh : P ∧ Q\n⊢ Q ∧ P', { exact: true }),
   ).toBeVisible();
@@ -263,6 +277,12 @@ test('walk through a proof, expand prerequisites recursively and return', async 
   await expect(
     workspace.getByRole('heading', { name: 'Conjunction symmetry' }),
   ).toBeVisible();
+  await expect(
+    workspace.getByRole('heading', { name: '2. Rebuild in reverse order' }),
+  ).toBeVisible();
+  await workspace.getByRole('button', { name: 'Proof outline', exact: true }).click();
+  await expect(outline).toBeVisible();
+  await expect(outline.getByRole('heading', { name: 'The argument' })).toBeFocused();
   await workspace
     .getByRole('button', { name: 'Explain Conjunction', exact: true })
     .click();
@@ -376,6 +396,7 @@ test('proof delivery retries once and an active Lean check can be cancelled', as
   await expect(
     workspace.getByText('Create a new walkthrough to revise this proof.'),
   ).toBeVisible();
+  await workspace.getByRole('button', { name: 'Step 1: Name the assumptions' }).click();
   await workspace.getByText('Lean tactic and goals', { exact: true }).click();
   await expect(
     workspace.getByText('This check did not record a tactic state for this step.'),
@@ -455,6 +476,7 @@ test('a check for a different source cannot certify the displayed proof', async 
   await expect(
     workspace.getByText('Formal statement checked', { exact: true }),
   ).toHaveCount(0);
+  await workspace.getByRole('button', { name: 'Step 1: Name the assumptions' }).click();
   await workspace.getByText('Lean tactic and goals', { exact: true }).click();
   await expect(workspace.getByText('Before · observed by Lean')).toHaveCount(0);
 });

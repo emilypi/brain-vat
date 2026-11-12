@@ -181,6 +181,7 @@ test('named contexts update and reopen proof checks without running them again',
     workspace.getByText('Formal statement checked', { exact: true }),
   ).toBeVisible();
   await save(page, 'Reflexivity study');
+  await workspace.getByText('Walkthroughs & selection', { exact: true }).click();
   await workspace.getByRole('button', { name: 'Break down current selection' }).click();
   await expect(
     workspace.getByRole('heading', { name: 'Equality is reflexive' }),
@@ -203,6 +204,11 @@ test('named contexts update and reopen proof checks without running them again',
   await expect(
     workspace.getByText('Formal statement checked', { exact: true }),
   ).toBeVisible();
+  await workspace
+    .getByRole('navigation', { name: 'Proof outline' })
+    .getByRole('button')
+    .first()
+    .click();
   await workspace.getByText('Lean tactic and goals', { exact: true }).click();
   await expect(
     workspace.getByText('⊢ ∀ (n : Nat), n = n', { exact: true }),
