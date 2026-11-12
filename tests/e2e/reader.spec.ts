@@ -36,15 +36,20 @@ test('text anchors survive zoom, rotation and reopening the PDF', async ({ page 
   await page.getByRole('button', { name: 'Save highlight' }).click();
   const polygon = page.getByTestId('saved-highlight').first();
   await expect(polygon).toBeVisible();
-  const before = await polygon.boundingBox();
-  if (!before) throw new Error('Missing saved highlight.');
+  // Measure the anchor itself, independently of its decorative outline stroke.
+  const geometry = () =>
+    polygon.evaluate((element) => {
+      const { width, height } = (element as SVGGraphicsElement).getBBox();
+      return { width, height };
+    });
+  const before = await geometry();
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(page.locator('.pdf-page[data-active="true"]')).toHaveAttribute(
     'data-ready',
     'true',
   );
-  const zoomed = await polygon.boundingBox();
-  expect(zoomed?.width).toBeCloseTo(before.width * (1.2 / 1.05), 0);
+  const zoomed = await geometry();
+  expect(zoomed.width).toBeCloseTo(before.width * (1.2 / 1.05), 0);
   const pageBeforeRotation = await page
     .locator('.pdf-page[data-active="true"]')
     .boundingBox();
@@ -54,11 +59,11 @@ test('text anchors survive zoom, rotation and reopening the PDF', async ({ page 
     'data-ready',
     'true',
   );
-  const rotated = await polygon.boundingBox();
+  const rotated = await geometry();
   const pageAfterRotation = await page
     .locator('.pdf-page[data-active="true"]')
     .boundingBox();
-  if (!pageBeforeRotation || !pageAfterRotation || !zoomed || !rotated) {
+  if (!pageBeforeRotation || !pageAfterRotation) {
     throw new Error('Missing rotated page or highlight.');
   }
   // Rotation refits the page; the anchor must retain its normalized position.
@@ -104,9 +109,13 @@ test('region capture saves independently of selectable text', async ({ page }) =
   await expect(page.getByRole('status')).toHaveText('Highlight saved on this device.');
   await page.reload();
   await expect(page.getByTestId('saved-highlight')).toBeVisible();
-  const saved = await page.getByTestId('saved-highlight').boundingBox();
-  expect(saved?.width).toBeCloseTo(210, 0);
-  expect(saved?.height).toBeCloseTo(70, 0);
+  // The anchor remains exact; its decorative stroke extends outside the box.
+  const saved = await page.getByTestId('saved-highlight').evaluate((element) => {
+    const bounds = (element as SVGGraphicsElement).getBBox();
+    return { width: bounds.width, height: bounds.height };
+  });
+  expect(saved.width).toBeCloseTo(210, 0);
+  expect(saved.height).toBeCloseTo(70, 0);
 });
 
 test('evidence is labeled and sources return to the cited page', async ({ page }) => {

@@ -20,6 +20,7 @@ interface PdfPageProps {
   selectionMode: SelectionMode;
   highlights: Highlight[];
   selection: Anchor | null;
+  inspectedAnchor: Anchor | null;
   onSelect: (anchor: Anchor | null) => void;
   onDefine: (anchor: Anchor) => void;
   onNavigate?: (pageIndex: number) => void;
@@ -55,6 +56,7 @@ export function PdfPage({
   selectionMode,
   highlights,
   selection,
+  inspectedAnchor,
   onSelect,
   onDefine,
   onNavigate,
@@ -254,6 +256,14 @@ export function PdfPage({
   if (selection?.pageIndex === pageIndex) {
     selection.quads.forEach((quad, index) => {
       polygons.push({ key: 'selection:' + index, quad, kind: 'selected' });
+    });
+  }
+  if (
+    inspectedAnchor?.documentId === documentId &&
+    inspectedAnchor.pageIndex === pageIndex
+  ) {
+    inspectedAnchor.quads.forEach((quad, index) => {
+      polygons.push({ key: 'proof:' + index, quad, kind: 'inspected' });
     });
   }
 

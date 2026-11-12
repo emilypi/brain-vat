@@ -19,6 +19,8 @@ test('cropped and rotated PDF anchors retain their source links', async ({ page 
   const title = page
     .locator('.textLayer span')
     .filter({ hasText: 'Rotated crop evidence' });
+  // Wait for the drawer's layout motion before capturing drag coordinates.
+  await title.click({ trial: true });
   const initial = await title.boundingBox();
   if (!initial) throw new Error('The rotated title is not selectable.');
   await page.mouse.move(initial.x + initial.width / 2, initial.y + 1);
@@ -31,17 +33,17 @@ test('cropped and rotated PDF anchors retain their source links', async ({ page 
   await page.getByRole('button', { name: 'Save highlight' }).click();
   await expect(page.getByRole('status')).toContainText('Highlight saved');
   const mark = page.getByTestId('saved-highlight').first();
-  const saved = await mark.boundingBox();
-  expect(saved?.height).toBeCloseTo(initial.height, 0);
+  // Verify anchor geometry independently of its decorative outline stroke.
+  const height = () =>
+    mark.evaluate((element) => (element as SVGGraphicsElement).getBBox().height);
+  expect(await height()).toBeCloseTo(initial.height, 0);
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(surface).toHaveAttribute('data-ready', 'true');
-  const zoomed = await mark.boundingBox();
-  expect(zoomed?.height).toBeCloseTo(initial.height * (1.2 / 1.05), 0);
+  expect(await height()).toBeCloseTo(initial.height * (1.2 / 1.05), 0);
   await page.reload();
   await expect(surface).toHaveAttribute('data-ready', 'true');
   await expect(mark).toBeVisible();
-  const restored = await mark.boundingBox();
-  expect(restored?.height).toBeCloseTo(initial.height, 0);
+  expect(await height()).toBeCloseTo(initial.height, 0);
 
   const link = page.locator('.pdf-source a').first();
   await expect(link).toHaveAttribute('href', 'https://example.org/evidence');
