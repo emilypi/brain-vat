@@ -30,11 +30,15 @@ const annotationSchema = z.object({
   dest: z.union([z.string(), z.array(z.unknown())]).optional(),
 });
 
+/** Shared policy for displayed source links; never authorizes fetching a URL. */
 export function safeExternalUrl(raw: string | null | undefined): string | null {
-  if (!raw || raw.length > 4096) return null;
+  if (!raw || raw.length > 2048) return null;
+  if ([...raw].some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127))
+    return null;
   try {
     const url = new URL(raw);
-    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
+      return null;
     return url.href;
   } catch {
     return null;
@@ -67,7 +71,7 @@ export function readLinkAnnotations(annotations: unknown[]): PdfSource[] {
 export function findTextReferences(text: string): TextReference[] {
   const pattern = new RegExp(
     [
-      String.raw`https:\/\/[^\s<>]+`,
+      String.raw`https?:\/\/[^\s<>]+`,
       String.raw`\b10\.\d{4,9}\/[^\s<>]+`,
       String.raw`\barXiv:\s*\d{4}\.\d{4,5}(?:v\d+)?`,
       String.raw`\[\d+(?:\s*[-–,]\s*\d+)*\]`,
@@ -79,7 +83,7 @@ export function findTextReferences(text: string): TextReference[] {
     const raw = match[0];
     const label = raw.replace(/[.,;:]+$/, '');
     let url: string | null = null;
-    if (/^https:/i.test(label)) url = safeExternalUrl(label);
+    if (/^https?:/i.test(label)) url = safeExternalUrl(label);
     else if (/^10\./.test(label)) url = safeExternalUrl('https://doi.org/' + label);
     else if (/^arxiv:/i.test(label)) {
       url = safeExternalUrl(

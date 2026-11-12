@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAstraProvider, ProviderError } from '../../server/provider.ts';
-import {
-  buildExternalEvidence,
-  buildPaperEvidence,
-  safeSourceUrl,
-} from '../../server/evidence.ts';
+import { buildExternalEvidence, buildPaperEvidence } from '../../server/evidence.ts';
+import { safeExternalUrl } from '../../src/source-links.ts';
 import type { ProviderInput } from '../../src/workspace-contract.ts';
 import { PROOF_FIXTURE } from '../fixtures/proofs';
 import { LEAN_VERSION, MATHLIB_VERSION } from '../../src/proof.ts';
@@ -507,7 +504,7 @@ describe('explicit external search', () => {
     '//example.org',
     'https://example.org/\nx',
   ])('excludes unsafe citation URL %s', (url) => {
-    expect(safeSourceUrl(url)).toBeNull();
+    expect(safeExternalUrl(url)).toBeNull();
     expect(
       buildExternalEvidence([
         {
