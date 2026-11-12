@@ -18,7 +18,10 @@ const provider: AiProvider = {
         {
           heading: 'An explanation',
           text: 'A supported explanation of the paper.',
-          evidenceIds: ['paper-0'],
+          evidenceIds:
+            input.question === 'explain prefix sum'
+              ? ['paper-0', 'reference-7']
+              : ['paper-0'],
         },
       ],
       evidence: [
@@ -30,6 +33,15 @@ const provider: AiProvider = {
           pageIndex: 0,
           url: null,
           availability: 'excerpt',
+        },
+        {
+          id: 'reference-7',
+          title: 'Reference listed in the paper',
+          origin: 'citedReference',
+          excerpt: 'An ordinary HTTP arXiv bibliography link.',
+          pageIndex: 0,
+          url: 'http://arxiv.org/abs/1903.10677',
+          availability: 'metadataOnly',
         },
       ],
       model: 'test-astra',
@@ -48,6 +60,9 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   await app.close();
+});
+test.beforeEach(() => {
+  inputs.length = 0;
 });
 
 test('solo Ask submits with Enter, keeps context and needs no account', async ({
@@ -96,4 +111,52 @@ test('solo Ask submits with Enter, keeps context and needs no account', async ({
   await search.press('Enter');
   await expect(page.getByText('MATCHING PASSAGES', { exact: true })).toBeVisible();
   expect(inputs).toHaveLength(2);
+});
+
+test('HTTP citations display in new and saved answers without regenerating', async ({
+  page,
+  context,
+}) => {
+  await context.addInitScript((baseUrl) => {
+    localStorage.setItem(
+      'brain-vat-service',
+      JSON.stringify({ baseUrl, session: null }),
+    );
+  }, origin);
+  await page.goto('/');
+  await page.getByTestId('pdf-upload').setInputFiles({
+    name: 'paper.pdf',
+    mimeType: 'application/pdf',
+    buffer: makePdfFixture(),
+  });
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
+  const question = page.getByRole('textbox', { name: 'Ask about this paper' });
+  await question.fill('explain prefix sum');
+  await expect(page.getByRole('button', { name: 'Send AI question' })).toBeEnabled();
+  await question.press('Enter');
+  const answer = page.getByText('A supported explanation of the paper.');
+  await expect(answer).toBeVisible();
+  await page.getByText('Sources (2)', { exact: true }).click();
+  const source = page.getByRole('link', { name: 'Open source', exact: true });
+  await expect(source).toHaveAttribute('href', 'http://arxiv.org/abs/1903.10677');
+  await expect(source).toHaveAttribute('rel', 'noreferrer');
+  await expect(page.getByText('Cited reference', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Metadata only · source content was not retrieved.'),
+  ).toBeVisible();
+
+  await page.locator('.saved-context-control summary').click();
+  await page
+    .getByRole('textbox', { name: 'Context name', exact: true })
+    .fill('Prefix sums');
+  await page.getByRole('button', { name: 'Save context', exact: true }).click();
+  await expect(page.locator('.context-current')).toHaveText('Prefix sums');
+  await page.reload();
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
+  await expect(answer).toBeVisible();
+  await expect(page.getByText(/answer is withheld/)).toHaveCount(0);
+  await page.getByText('Sources (2)', { exact: true }).click();
+  await expect(source).toHaveAttribute('href', 'http://arxiv.org/abs/1903.10677');
+  expect(inputs).toHaveLength(1);
+  await page.screenshot({ path: 'test-results/http-citation-answer.png' });
 });
