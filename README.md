@@ -19,6 +19,8 @@ local papers and highlights in that browser. URL imports require the site's CORS
 permission; otherwise download the PDF and upload it, or use the extension.
 
 The design principle is a lightweight overlay that enhances legibility at all times.
+Visible UI takes priority over preparation: show the reader first, then restore
+annotations and index the full paper in the background.
 The paper opens without a title banner; the library and companion start collapsed.
 Use **Library** in the slim left rail to find papers, highlights and room notes.
 Its **Contents** browser shows the PDF's embedded section hierarchy, with search
@@ -29,7 +31,8 @@ bright cream and neutral charcoal, and remembers the choice.
 Ask eases open and closed; on narrower screens it overlays the page to preserve
 the reading size. The motion follows your system's reduced-motion preference.
 
-Scroll continuously through the PDF; nearby pages render as you reach them. Zoom
+The first page appears while later page dimensions and paper text load in the
+background. Scroll continuously through the PDF; nearby pages render as you reach them. Zoom
 stays visible and preserves your reading position. Select text to save a highlight
 or ask about it. **Reading options** contains rotation, **Region** capture, source
 visibility and **Enhanced reading**. PDFs fit the available width by default;
@@ -186,6 +189,8 @@ pnpm build:web
 pnpm build:extension
 pnpm exec playwright install chromium
 pnpm test:e2e
+pnpm exec playwright install firefox
+pnpm test:e2e:firefox
 pnpm audit
 ```
 
@@ -205,4 +210,5 @@ pnpm audit
 Tests cover account/room isolation, invite replay, revocation, concurrent notes,
 restart recovery, AI request idempotency, provider failure handling, and real browser
 reading flows. Test providers are explicit fixtures; tests do not incur LLM charges.
+The web reader is tested in Chromium and Firefox; extension tests use Chromium.
 See [THIRD_PARTY.md](THIRD_PARTY.md) for the example paper's attribution and license.

@@ -27,7 +27,8 @@ contact, and a privacy policy at a stable URL. Its data disclosure should state:
 - Host permissions are requested for paper imports and the chosen server.
 
 Review current store requirements when submitting. This repository does not claim
-store approval or browser support beyond tested Chromium.
+store approval. The web reader is tested in Chromium and Firefox; the extension
+package targets Chrome.
 
 ## Product boundaries
 
