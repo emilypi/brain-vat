@@ -26,6 +26,8 @@ and page links. PDFs without an embedded outline say so; headings are not inferr
 The bottom dock holds page navigation, zoom, **Reading options**, and **Ask**. Closing the
 companion preserves an unfinished question. The rail's theme toggle switches between
 bright cream and neutral charcoal, and remembers the choice.
+Ask eases open and closed; on narrower screens it overlays the page to preserve
+the reading size. The motion follows your system's reduced-motion preference.
 
 Scroll continuously through the PDF; nearby pages render as you reach them. Zoom
 stays visible and preserves your reading position. Select text to save a highlight

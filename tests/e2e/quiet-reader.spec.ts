@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 
-for (const width of [1440, 800, 320]) {
+for (const width of [1440, 1280, 800, 320]) {
   test(`reading stays unobstructed at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
@@ -59,3 +59,81 @@ for (const width of [1440, 800, 320]) {
     }
   });
 }
+
+test('Ask moves smoothly while the PDF keeps its canvas and reading position', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Read the example paper' }).click();
+  const paper = page.locator('.pdf-page[data-active="true"]');
+  await expect(paper).toHaveAttribute('data-ready', 'true');
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await expect(paper).toHaveAttribute('data-ready', 'true');
+  const motion = await page.evaluate(async () => {
+    const drawer = document.querySelector<HTMLElement>('#reading-companion')!;
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      '.pdf-page[data-active="true"] canvas',
+    )!;
+    const stage = document.querySelector<HTMLElement>('.page-stage')!;
+    const toggle = document.querySelector<HTMLButtonElement>('.companion-toggle')!;
+    const initialTop = stage.scrollTop;
+    let redraws = 0;
+    const observer = new MutationObserver((changes) => {
+      redraws += changes.length;
+    });
+    observer.observe(canvas, {
+      attributes: true,
+      attributeFilter: ['width', 'height'],
+    });
+    const positions = new Set<number>();
+    toggle.click();
+    await new Promise<void>((resolve) => {
+      const sample = (): void => {
+        positions.add(Math.round(drawer.getBoundingClientRect().x));
+        if (drawer.getAnimations().some((item) => item.playState === 'running')) {
+          requestAnimationFrame(sample);
+        } else resolve();
+      };
+      requestAnimationFrame(sample);
+    });
+    observer.disconnect();
+    return {
+      positions: positions.size,
+      redraws,
+      scrollShift: Math.abs(stage.scrollTop - initialTop),
+    };
+  });
+  expect(motion.positions).toBeGreaterThan(2);
+  expect(motion.redraws).toBe(0);
+  expect(motion.scrollShift).toBeLessThan(1);
+
+  const question = page.getByRole('textbox', { name: 'Search this paper' });
+  await question.fill('Keep my draft');
+  await question.press('Escape');
+  await expect(
+    page.getByRole('button', { name: 'Toggle reading companion' }),
+  ).toBeFocused();
+  await expect(page.getByRole('complementary')).toBeHidden();
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
+  await expect(question).toHaveValue('Keep my draft');
+});
+
+test('reduced motion opens and closes Ask immediately', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  const toggle = page.getByRole('button', { name: 'Toggle reading companion' });
+  await page.getByRole('button', { name: 'Read the example paper' }).click();
+  await toggle.click();
+  await expect(page.getByRole('complementary')).toBeVisible();
+  expect(
+    await page.locator('.reader-app').evaluate((element) => {
+      const drawer = element.querySelector('#reading-companion')!;
+      return [...element.getAnimations(), ...drawer.getAnimations()].filter(
+        (item) => item.playState === 'running',
+      ).length;
+    }),
+  ).toBe(0);
+  await page.getByRole('button', { name: 'Close reading companion' }).click();
+  await expect(page.getByRole('complementary')).toBeHidden();
+  await expect(toggle).toBeFocused();
+});
