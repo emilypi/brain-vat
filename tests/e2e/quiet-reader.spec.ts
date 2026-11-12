@@ -137,3 +137,35 @@ test('reduced motion opens and closes Ask immediately', async ({ page }) => {
   await expect(page.getByRole('complementary')).toBeHidden();
   await expect(toggle).toBeFocused();
 });
+
+test('the companion resizes with pointer and keyboard while keeping the page', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Read the example paper' }).click();
+  const active = page.locator('.pdf-page[data-active="true"]');
+  await expect(active).toHaveAttribute('data-ready', 'true');
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await page.getByRole('button', { name: 'Toggle reading companion' }).click();
+  const divider = page.getByRole('separator', { name: 'Resize reading companion' });
+  await divider.press('ArrowLeft');
+  await expect(divider).toHaveAttribute('aria-valuenow', '440');
+  await divider.press('ArrowRight');
+  await expect(divider).toHaveAttribute('aria-valuenow', '420');
+  await divider.click({ trial: true });
+  const bounds = await divider.boundingBox();
+  if (!bounds) throw new Error('Missing panel divider');
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2 - 140, bounds.y + 300);
+  await page.mouse.up();
+  await expect(divider).toHaveAttribute('aria-valuenow', '560');
+  await expect(page.locator('.companion-drawer')).toHaveCSS('width', '560px');
+  await expect(page.getByRole('spinbutton', { name: 'Page number' })).toHaveValue('2');
+  await expect(active).toHaveAttribute('data-ready', 'true');
+  await divider.press('Enter');
+  await expect(divider).toHaveAttribute('aria-valuenow', '420');
+  await expect(
+    page.getByRole('button', { name: 'Zoom in', exact: true }),
+  ).toBeVisible();
+});

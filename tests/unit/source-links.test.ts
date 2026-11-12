@@ -6,22 +6,34 @@ import {
   validateAnswerEvidence,
 } from '../../src/source-links';
 import type { GeneratedAnswer } from '../../src/workspace-contract';
+import { buildPaperEvidence } from '../../server/evidence';
 
 describe('source links', () => {
   it.each([
     'javascript:alert(1)',
     'data:text/html,test',
     'file:///tmp/a',
-    'http://example.com/paper',
     'https://name:password@example.com/',
+    'http://name:password@example.com/',
+    '//example.com/paper',
+    'https://example.com/\nx',
+    'https://example.com/\tx',
+    'https://example.com/a b',
+    ' https://example.com/paper',
   ])('rejects unsafe external link %s', (value) => {
     expect(safeExternalUrl(value)).toBeNull();
   });
 
-  it('preserves a valid HTTPS source', () => {
-    expect(safeExternalUrl('https://doi.org/10.1000/182')).toBe(
-      'https://doi.org/10.1000/182',
-    );
+  it.each([
+    'https://doi.org/10.1000/182',
+    'http://arxiv.org/abs/1903.10677',
+    'http://example.org/background',
+  ])('preserves an ordinary citation URL %s', (url) => {
+    expect(safeExternalUrl(url)).toBe(url);
+  });
+
+  it('rejects oversized URLs at the shared citation boundary', () => {
+    expect(safeExternalUrl('https://example.org/' + 'x'.repeat(2048))).toBeNull();
   });
 
   it('detects identifiers with their original text offsets', () => {
@@ -91,5 +103,55 @@ describe('generated citation integrity', () => {
 
   it('rejects pages beyond the source document', () => {
     expect(validateAnswerEvidence(answer, 0)).toContain('unavailable page');
+  });
+
+  it.each([false, true])('accepts HTTP bibliography evidence, cited=%s', (cited) => {
+    const evidence = buildPaperEvidence({
+      title: 'Vectorizing Recurrences over Semirings',
+      question: 'explain prefix sum',
+      kind: 'question',
+      pages: [
+        { pageIndex: 0, text: 'Prefix sum is a running total.' },
+        {
+          pageIndex: 1,
+          text: 'References [7] http://arxiv.org/abs/1903.10677',
+        },
+      ],
+      selection: null,
+      image: null,
+      externalQuery: null,
+      history: [],
+    });
+    expect(evidence.find((source) => source.id === 'reference:1')?.url).toBe(
+      'http://arxiv.org/abs/1903.10677',
+    );
+    expect(
+      validateAnswerEvidence(
+        {
+          ...answer,
+          blocks: [
+            {
+              heading: 'Prefix sums',
+              text: 'A prefix sum is a running total.',
+              evidenceIds: cited ? ['paper:p1:c1', 'reference:1'] : ['paper:p1:c1'],
+            },
+          ],
+          evidence,
+        },
+        2,
+      ),
+    ).toBeNull();
+  });
+
+  it('still rejects an executable URL in a returned evidence record', () => {
+    expect(
+      validateAnswerEvidence(
+        {
+          ...answer,
+          evidence: [{ ...answer.evidence[0]!, url: 'javascript:alert(1)' }],
+        },
+        3,
+      ),
+    ).toContain('unsupported link');
   });
 });

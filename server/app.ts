@@ -16,6 +16,7 @@ import { createAstraProvider, ProviderError } from './provider.ts';
 import { ApiError, WorkspaceStore } from './store.ts';
 import { localRequest, registerSolo } from './solo.ts';
 import { proofBreakdownSchema, proofReferenceError } from '../src/proof.ts';
+import { safeExternalUrl } from '../src/source-links.ts';
 import type { LeanChecker, ProofCheck } from '../src/proof.ts';
 import {
   attachProofArtifact,
@@ -46,16 +47,7 @@ const versionSchema = z.number().int().positive();
 const safeUrl = z
   .string()
   .max(2048)
-  .refine((value) => {
-    try {
-      const url = new URL(value);
-      return (
-        ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
-      );
-    } catch {
-      return false;
-    }
-  });
+  .refine((value) => safeExternalUrl(value) !== null);
 const importSchema = z
   .object({
     title: z.string().trim().min(1).max(300),
