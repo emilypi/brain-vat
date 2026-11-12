@@ -7,6 +7,7 @@ import {
 } from '../../server/evidence.ts';
 import type { ProviderInput } from '../../src/workspace-contract.ts';
 import { PROOF_FIXTURE } from '../fixtures/proofs';
+import { LEAN_VERSION, MATHLIB_VERSION } from '../../src/proof.ts';
 
 const INPUT: ProviderInput = {
   title: 'Private unpublished paper',
@@ -76,6 +77,40 @@ afterEach(() => {
 });
 
 describe('grounded Responses requests', () => {
+  it('keeps remembered proofs separate from sources in ordinary questions', async () => {
+    const rememberedProofs: NonNullable<ProviderInput['rememberedProofs']> = [
+      {
+        runId: crypto.randomUUID(),
+        title: PROOF_FIXTURE.title,
+        claim: PROOF_FIXTURE.claim,
+        summary: PROOF_FIXTURE.summary,
+        assumptions: PROOF_FIXTURE.assumptions,
+        gaps: ['The link to the paper still requires interpretation.'],
+        statement: PROOF_FIXTURE.statement,
+        sourceAnchor: null,
+        verification: {
+          status: 'checked',
+          sourceHash: 'a'.repeat(64),
+          leanVersion: LEAN_VERSION,
+          mathlibVersion: MATHLIB_VERSION,
+          matchesCurrentRuntime: true,
+        },
+      },
+    ];
+    const fetch = fakeFetch(response());
+    await createAstraProvider({ apiKey: 'key', fetch }).generate(
+      { ...INPUT, rememberedProofs },
+      new AbortController().signal,
+    );
+    const sent = body(fetch);
+    const context = JSON.parse(sent.input[0].content[0].text);
+    expect(context.rememberedProofs).toEqual(rememberedProofs);
+    expect(context.evidence).toEqual(buildPaperEvidence(INPUT));
+    expect(sent.instructions).toContain('historical explanations, not source evidence');
+    expect(sent.instructions).toContain('not imported Lean lemmas');
+    expect(sent.instructions).toContain('runId is internal');
+  });
+
   it('sends the model and strict schema with server-only credentials', async () => {
     const fetch = fakeFetch(response());
     const provider = createAstraProvider({ apiKey: 'secret-key', fetch });

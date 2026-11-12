@@ -15,6 +15,9 @@ A store submission needs the owner's developer account, screenshots, support
 contact, and a privacy policy at a stable URL. Its data disclosure should state:
 
 - Local reading stores PDFs/highlights in browser storage.
+- Saving a named solo context stores paper text, conversation, proof walkthroughs
+  and checks on the local server and in its backups. Access references stay in
+  browser storage; new work in a saved context updates automatically.
 - Publishing a room uploads the PDF to the chosen Brain Vat server.
 - Members share highlights, notes, discussion and AI conversations.
 - AI requests send relevant context to the configured provider; external search
@@ -38,4 +41,5 @@ and AI execution are server-owned. Losing access blocks future requests; previou
 acquired data cannot be remotely erased. Keep disconnected note drafts until the
 server confirms they were saved.
 
-Lean-assisted proof checking is the next milestone in ROADMAP.md.
+Lean-assisted walkthroughs and local checking are available; see PROOFS.md for
+runtime requirements and the distinction between formal checks and paper meaning.

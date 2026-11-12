@@ -13,7 +13,7 @@ import {
   proofSourceHash,
 } from '../../server/proofs.ts';
 import type { Anchor } from '../../src/document.ts';
-import { LEAN_VERSION, MATHLIB_VERSION } from '../../src/proof.ts';
+import { LEAN_VERSION, MATHLIB_VERSION, renderLeanProof } from '../../src/proof.ts';
 import type { LeanChecker, ProofCheck, ProofCheckResult } from '../../src/proof.ts';
 import type {
   AiProvider,
@@ -248,6 +248,7 @@ describe('proof service boundaries', () => {
         proof: PROOF_FIXTURE,
         proofArtifact: {
           sourceHash: '0'.repeat(64),
+          renderedSource: { code: '-- forged source', challenge: '', steps: [] },
           sourceAnchor: null,
           parent: { runId: randomUUID(), prerequisiteId: null },
         },
@@ -256,6 +257,7 @@ describe('proof service boundaries', () => {
       const sourceHash = proofSourceHash(PROOF_FIXTURE);
       expect(proof.answer?.proofArtifact).toEqual({
         sourceHash,
+        renderedSource: renderLeanProof(PROOF_FIXTURE),
         sourceAnchor: anchor,
         parent: null,
       });

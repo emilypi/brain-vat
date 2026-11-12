@@ -7,6 +7,7 @@ import type {
   ProofArtifact,
   ProofBreakdown,
   ProofContext,
+  RememberedProof,
 } from './proof.ts';
 
 export const credentialsSchema = z.object({
@@ -144,6 +145,7 @@ export interface ProviderInput {
   pages: PaperPassage[];
   history: ChatMessage[];
   proofContext?: ProofContext;
+  rememberedProofs?: RememberedProof[];
 }
 
 export interface AiProvider {

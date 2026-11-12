@@ -1,0 +1,86 @@
+.saved-context-control {
+  position: relative;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.saved-context-control summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.saved-context-control summary::-webkit-details-marker {
+  display: none;
+}
+.saved-context-control summary::before {
+  content: '›';
+  transform: rotate(0deg);
+  font-size: 15px;
+}
+.saved-context-control[open] summary::before {
+  transform: rotate(90deg);
+}
+.context-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+.saved-context-menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: min(520px, 65dvh);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 36px #0002;
+}
+.saved-context-menu label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.saved-context-menu input,
+.saved-context-menu select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  color: var(--text);
+  background: var(--surface-secondary);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+.saved-context-menu .text-button {
+  font-size: 11px;
+}
+.saved-context-menu .context-storage-note {
+  margin: 10px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.context-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.context-confirmation {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.saved-context-menu .context-confirmation p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}

@@ -327,16 +327,24 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   app.addHook('onClose', async () => {
     closing = true;
     abort([...jobs.keys()]);
-    proofs.close();
-    store.close();
+    try {
+      closeSolo();
+    } finally {
+      try {
+        proofs.close();
+      } finally {
+        store.close();
+      }
+    }
   });
-  await registerSolo(
+  const closeSolo = await registerSolo(
     app,
     provider,
     options.enableSolo ?? false,
     allowedOrigins,
     validateAnswer,
     proofs,
+    store,
   );
   app.get('/api/health', async (request) => ({
     provider: provider.name,
