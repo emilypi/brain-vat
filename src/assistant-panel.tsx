@@ -11,7 +11,7 @@ import {
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
-import { findEvidence, pointToViewport } from './document';
+import { anchorSchema, findEvidence, pointToViewport } from './document';
 import { ThemeToggle } from './theme-toggle';
 import { AnswerContent } from './enhanced-reader';
 import { InlineDefinition, definitionKey } from './inline-definition';
@@ -23,7 +23,9 @@ import type { AssistantContext } from './bridge';
 import type { Anchor, Evidence, PageBox, Transform } from './document';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { RoomConnection } from './workspace-client';
-import { useService, WorkspaceClient } from './workspace-client';
+import { useService } from './workspace-client';
+import { useSoloContext } from './solo-context';
+import { SavedContextControl } from './saved-context-control';
 import type { AiRun, RunInput, ServiceStatus } from './workspace-contract';
 import './research.css';
 
@@ -76,6 +78,15 @@ function LocalAssistantPanel({
   const [submitted, setSubmitted] = useState('');
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const service = useService();
+  const saved = useSoloContext(service.client, context);
+  const {
+    runs,
+    client: soloClient,
+    getGeneration,
+    isCurrent,
+    ensureSession,
+    acceptRun,
+  } = saved;
   const [health, setHealth] = useState<ServiceStatus | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
   const [definitionRequestIds, setDefinitionRequestIds] = useState<
@@ -83,21 +94,18 @@ function LocalAssistantPanel({
   >({});
   const [definitionErrorKey, setDefinitionErrorKey] = useState<string | null>(null);
   const [mode, setMode] = useState<'ask' | 'search'>('ask');
-  const [runs, setRuns] = useState<AiRun[]>([]);
   const [proofOpen, setProofOpen] = useState(false);
   const [proofRunId, setProofRunId] = useState<string | null>(null);
-  const [soloClient, setSoloClient] = useState<WorkspaceClient | null>(null);
   const handledProofTarget = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState<RunInput | null>(null);
   const [canceling, setCanceling] = useState<string | null>(null);
-  const solo = useRef<WorkspaceClient | null>(null);
   const inFlight = useRef(false);
-  const generation = useRef(0);
   const conversation = useRef<HTMLDivElement>(null);
   const documentId = context?.documentId;
   const aiAvailable = Boolean(health?.configured && health.soloAvailable);
+  const contextBlocked = saved.loading || Boolean(saved.unavailableId);
   const asking = aiAvailable && mode === 'ask';
   const selection = context?.selection;
   const suggestions = asking
@@ -108,82 +116,38 @@ function LocalAssistantPanel({
     : ['What does convolution mean here?', 'Where is semiring defined?'];
 
   useEffect(() => {
-    const current = ++generation.current;
+    let cancelled = false;
     setHealth(null);
     setHealthChecked(false);
-    setDefinitionRequestIds({});
-    setDefinitionErrorKey(null);
-    setRuns([]);
-    setProofRunId(null);
-    setProofOpen(false);
-    setSoloClient(null);
-    handledProofTarget.current = null;
-    setError('');
-    setPending(null);
-    setBusy(false);
-    inFlight.current = false;
     void service.client
       .request<ServiceStatus>('/health')
       .then((status) => {
-        if (current === generation.current) setHealth(status);
+        if (!cancelled) setHealth(status);
       })
       .catch(() => {
-        if (current === generation.current) setHealth(null);
+        if (!cancelled) setHealth(null);
       })
       .finally(() => {
-        if (current === generation.current) setHealthChecked(true);
+        if (!cancelled) setHealthChecked(true);
       });
     return () => {
-      generation.current += 1;
-      const client = solo.current;
-      solo.current = null;
-      if (client)
-        void client
-          .request('/solo/session', { method: 'DELETE' })
-          .catch(() => undefined);
+      cancelled = true;
     };
   }, [service.client, documentId]);
 
-  const acceptRun = useCallback((run: AiRun): void => {
-    setRuns((current) => [...current.filter((item) => item.id !== run.id), run]);
-  }, []);
-
   useEffect(() => {
-    const running = runs.filter((run) => run.status === 'running');
-    const client = solo.current;
-    if (!client || running.length === 0) return;
-    let cancelled = false;
-    let polling = false;
-    const poll = async (): Promise<void> => {
-      if (polling) return;
-      polling = true;
-      try {
-        const updates = await Promise.all(
-          running.map((run) => client.request<AiRun>('/solo/runs/' + run.id)),
-        );
-        if (!cancelled) {
-          setRuns((current) =>
-            current.map((run) => updates.find((item) => item.id === run.id) ?? run),
-          );
-          setError('');
-        }
-      } catch (reason) {
-        if (!cancelled)
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : 'Could not check the answer. Your question has not been sent again.',
-          );
-      } finally {
-        polling = false;
-      }
-    };
-    const timer = setInterval(() => void poll(), 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [runs]);
+    setDefinitionRequestIds({});
+    setDefinitionErrorKey(null);
+    setProofRunId(null);
+    setProofOpen(false);
+    setError('');
+    setPending(null);
+    setBusy(false);
+    setCanceling(null);
+    setSubmitted('');
+    setEvidence([]);
+    inFlight.current = false;
+  }, [saved.sessionKey]);
 
   const finishedCount = runs.filter((run) => run.status !== 'running').length;
   useEffect(() => {
@@ -206,13 +170,14 @@ function LocalAssistantPanel({
       if (
         !context ||
         !aiAvailable ||
+        contextBlocked ||
         indexing ||
         !question.trim() ||
         inFlight.current
       ) {
         return;
       }
-      const current = generation.current;
+      const current = getGeneration();
       inFlight.current = true;
       setBusy(true);
       setError('');
@@ -236,7 +201,7 @@ function LocalAssistantPanel({
             externalQuery: null,
             ...(proofRequest?.parent ? { proofParent: proofRequest.parent } : {}),
           });
-        if (current !== generation.current) return;
+        if (!isCurrent(current)) return;
         if (input.kind === 'definition' && input.selection) {
           const key = definitionKey(input.selection, input.externalQuery);
           setDefinitionErrorKey(key);
@@ -245,34 +210,14 @@ function LocalAssistantPanel({
             [key]: input.requestId,
           }));
         }
-        if (!solo.current) {
-          const session = await service.client.request<{ token: string }>(
-            '/solo/sessions',
-            {
-              method: 'POST',
-              body: JSON.stringify({
-                documentId: context.documentId,
-                title: context.title,
-                pages: context.pages,
-              }),
-            },
-          );
-          const client = new WorkspaceClient(service.client.baseUrl, session.token);
-          if (current !== generation.current) {
-            void client
-              .request('/solo/session', { method: 'DELETE' })
-              .catch(() => undefined);
-            return;
-          }
-          solo.current = client;
-          setSoloClient(client);
-        }
+        const client = await ensureSession();
+        if (!client || !isCurrent(current)) return;
         setPending(input);
-        const run = await solo.current.request<AiRun>('/solo/runs', {
+        const run = await client.request<AiRun>('/solo/runs', {
           method: 'POST',
           body: JSON.stringify(input),
         });
-        if (current !== generation.current) return;
+        if (!isCurrent(current)) return;
         acceptRun(run);
         if (input.kind === 'proof') {
           setProofRunId(run.id);
@@ -281,27 +226,58 @@ function LocalAssistantPanel({
         setPending(null);
         setQuery((value) => (value.trim() === question.trim() ? '' : value));
       } catch (reason) {
-        if (current === generation.current)
+        if (isCurrent(current))
           setError(
             reason instanceof Error ? reason.message : 'Could not send this question.',
           );
       } finally {
-        if (current === generation.current) {
+        if (isCurrent(current)) {
           setBusy(false);
           inFlight.current = false;
         }
       }
     },
-    [acceptRun, aiAvailable, context, indexing, pdfDocument, selection, service.client],
+    [
+      acceptRun,
+      aiAvailable,
+      context,
+      contextBlocked,
+      ensureSession,
+      getGeneration,
+      isCurrent,
+      indexing,
+      pdfDocument,
+      selection,
+    ],
   );
 
   const requestProof = useCallback(
     (request: ProofRequest): void => {
       setProofOpen(true);
-      if (busy || pending) return;
+      if (busy || pending || contextBlocked) return;
+      const anchor = request.selection ?? selection;
+      const prior =
+        !request.parent && !request.regenerate && anchor
+          ? [...runs].reverse().find((item) => {
+              const artifact = item.answer?.proofArtifact;
+              return (
+                item.kind === 'proof' &&
+                item.status === 'completed' &&
+                item.question === request.question &&
+                !artifact?.parent &&
+                artifact?.sourceAnchor &&
+                JSON.stringify(anchorSchema.parse(artifact.sourceAnchor)) ===
+                  JSON.stringify(anchorSchema.parse(anchor))
+              );
+            })
+          : null;
+      if (prior) {
+        setProofRunId(prior.id);
+        return;
+      }
       void ask(request.question, undefined, request);
     },
-    [ask, busy, pending],
+    [ask, busy, contextBlocked, pending, runs, selection],
   );
 
   useEffect(() => {
@@ -311,19 +287,20 @@ function LocalAssistantPanel({
       proofTarget.anchor.documentId !== documentId ||
       !healthChecked ||
       indexing ||
+      contextBlocked ||
       busy ||
       pending
     )
       return;
     handledProofTarget.current = proofTarget.id;
     setProofOpen(true);
-    if (aiAvailable)
-      requestProof({ question: PROOF_QUESTION, selection: proofTarget.anchor });
+    requestProof({ question: PROOF_QUESTION, selection: proofTarget.anchor });
   }, [
     proofTarget,
     documentId,
     healthChecked,
     indexing,
+    contextBlocked,
     busy,
     aiAvailable,
     pending,
@@ -331,23 +308,23 @@ function LocalAssistantPanel({
   ]);
 
   const cancel = async (run: AiRun): Promise<void> => {
-    const current = generation.current;
+    const current = getGeneration();
     setCanceling(run.id);
     try {
-      const result = await solo.current?.request<AiRun>(
+      const result = await soloClient?.request<AiRun>(
         '/solo/runs/' + run.id + '/cancel',
         {
           method: 'POST',
         },
       );
-      if (result && current === generation.current) acceptRun(result);
+      if (result && isCurrent(current)) acceptRun(result);
     } catch (reason) {
-      if (current === generation.current)
+      if (isCurrent(current))
         setError(
           reason instanceof Error ? reason.message : 'Could not cancel the question.',
         );
     } finally {
-      if (current === generation.current) setCanceling(null);
+      if (isCurrent(current)) setCanceling(null);
     }
   };
 
@@ -388,6 +365,12 @@ function LocalAssistantPanel({
             Proofs
           </button>
         </div>
+        {context && (
+          <SavedContextControl
+            controller={saved}
+            disabled={indexing || busy || Boolean(pending)}
+          />
+        )}
       </header>
       <div className="panel-scroll" ref={conversation} hidden={proofOpen}>
         <div className="mode-note">
@@ -419,7 +402,7 @@ function LocalAssistantPanel({
                     </button>
                     <button
                       className="text-button"
-                      disabled={!aiAvailable || indexing || busy || Boolean(pending)}
+                      disabled={indexing || busy || Boolean(pending) || contextBlocked}
                       onClick={() =>
                         requestProof({ question: PROOF_QUESTION, selection })
                       }
@@ -467,7 +450,7 @@ function LocalAssistantPanel({
                 {suggestions.map((prompt) => (
                   <button
                     key={prompt}
-                    disabled={indexing || busy || Boolean(pending)}
+                    disabled={indexing || busy || Boolean(pending) || contextBlocked}
                     onClick={() => {
                       setQuery(prompt);
                       if (asking) void ask(prompt);
@@ -480,8 +463,10 @@ function LocalAssistantPanel({
                 ))}
                 <p className="muted small">
                   {asking
-                    ? 'Questions and relevant passages go to Astra. This conversation ' +
-                      'is private to this reading session.'
+                    ? 'Questions and relevant passages go to Astra. ' +
+                      (saved.active
+                        ? 'This conversation updates your saved context.'
+                        : 'Save a named context to keep this conversation.')
                     : 'This mode finds matching passages. AI explanations require ' +
                       'the local Astra service or a connected reading room.'}
                 </p>
@@ -575,13 +560,14 @@ function LocalAssistantPanel({
           configured={healthChecked ? aiAvailable : null}
           disabled={
             !aiAvailable ||
+            contextBlocked ||
             indexing ||
             busy ||
             Boolean(pending) ||
             runs.some((item) => item.kind === 'proof' && item.status === 'running')
           }
           busy={busy}
-          error={error}
+          error={error || saved.error}
           pending={Boolean(pending)}
           onRequest={requestProof}
           onOpen={setProofRunId}
@@ -633,7 +619,8 @@ function LocalAssistantPanel({
                 !indexing &&
                 Boolean(query.trim()) &&
                 !busy &&
-                !pending,
+                !pending &&
+                !contextBlocked,
             )
           }
           placeholder={
@@ -652,7 +639,14 @@ function LocalAssistantPanel({
             type="submit"
             className="send-button"
             aria-label={asking ? 'Send AI question' : 'Find supporting passages'}
-            disabled={!context || indexing || !query.trim() || busy || Boolean(pending)}
+            disabled={
+              !context ||
+              indexing ||
+              !query.trim() ||
+              busy ||
+              Boolean(pending) ||
+              contextBlocked
+            }
           >
             <ArrowUp size={18} />
           </button>

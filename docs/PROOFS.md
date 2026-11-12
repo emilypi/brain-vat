@@ -17,7 +17,15 @@ Expand a listed prerequisite to get another summary and stepwise walkthrough.
 You can also ask about background knowledge in your own words. Child explanations
 retain their parent proof and original source passage, even after the conversation
 grows. Use the parent navigation to return to the argument. Shared-room proofs and
-check results persist; solo walkthroughs last for the current reading session.
+checks persist automatically. In solo reading, use **Contexts** in Ask to save a
+named context; it keeps updating with later conversations, proofs and check results.
+Reopening it does not repeat AI requests or Lean checks, and works without an API key.
+
+Later explanations can use remembered claims, assumptions, gaps and recorded check
+results from the active context. Reopening the same selected proof reuses its
+walkthrough. This preserves the work already done; it does not yet make prior Lean
+theorems importable dependencies of newly generated proofs. New formalizations still
+receive independent checks.
 
 ## Reading verification status
 
@@ -30,7 +38,9 @@ check results persist; solo walkthroughs last for the current reading session.
 - **Unavailable**: the pinned runtime or safe execution environment is unavailable.
 - **Cancelled**: checking stopped without establishing a result.
 
-Completed check results are immutable. Repeated delivery returns the same result;
+Completed check results are immutable and retain their source and toolchain versions.
+Historical results apply to that recorded source, not to changes made by a later
+renderer or toolchain. Repeated delivery returns the same result;
 an unavailable check can be retried after setup or capacity becomes available.
 Create a new walkthrough to revise an unsuccessful formalization.
 

@@ -95,11 +95,14 @@ export function PdfReader({
     if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
-      setViewport((current) => ({
-        ...current,
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
-      }));
+      // Extra space only centers the page. Keep its canvas stable as Ask slides.
+      const width = Math.min(840, entry.contentRect.width);
+      const height = entry.contentRect.height;
+      setViewport((current) =>
+        current.width === width && current.height === height
+          ? current
+          : { ...current, width, height },
+      );
     });
     observer.observe(element);
     return () => observer.disconnect();

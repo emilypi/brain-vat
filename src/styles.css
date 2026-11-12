@@ -164,14 +164,17 @@ a {
   border: 0;
 }
 .reader-app {
+  --companion-duration: 460ms;
+  --companion-easing: cubic-bezier(0.22, 0, 0.18, 1);
   position: relative;
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) 350px;
+  transition: grid-template-columns var(--companion-duration) var(--companion-easing);
   height: 100dvh;
   overflow: hidden;
 }
 .reader-app.panel-hidden {
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr) 0px;
 }
 [hidden] {
   display: none !important;
@@ -542,9 +545,29 @@ h1 {
   color: var(--text-muted);
 }
 .companion-drawer {
-  position: relative;
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 350px;
+  z-index: 9;
   min-width: 0;
   min-height: 0;
+  transform: translateX(0);
+  opacity: 1;
+  visibility: visible;
+  transition:
+    transform var(--companion-duration) var(--companion-easing),
+    opacity 220ms ease-out,
+    visibility 0s;
+}
+.panel-hidden .companion-drawer {
+  transform: translateX(100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--companion-duration) var(--companion-easing),
+    opacity 220ms ease-out,
+    visibility 0s var(--companion-duration);
 }
 .companion-drawer .assistant-panel {
   height: 100%;
@@ -1182,10 +1205,30 @@ h1 {
   border-left: 0;
 }
 
+/* Keep the paper at its reading size when there is no room for both panes. */
+@media (max-width: 1319px) {
+  .reader-app,
+  .reader-app.panel-hidden {
+    grid-template-columns: 48px minmax(0, 1fr) 0px;
+  }
+  .companion-drawer {
+    inset: 0 0 68px auto;
+    width: min(350px, calc(100% - 48px));
+    box-shadow: -8px 0 30px #0002;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-app,
+  .reader-app .companion-drawer {
+    transition: none;
+  }
+}
+
 @media (max-width: 850px) {
   .reader-app,
   .reader-app.panel-hidden {
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr) 0px;
   }
   .reader-rail {
     padding-inline: 4px;

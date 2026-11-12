@@ -98,6 +98,7 @@ export function attachProofArtifact(
     ...answer,
     proofArtifact: {
       sourceHash: proofSourceHash(answer.proof),
+      renderedSource: renderLeanProof(answer.proof),
       sourceAnchor: context ? context.sourceAnchor : input.selection,
       parent: context
         ? {

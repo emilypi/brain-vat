@@ -61,6 +61,27 @@ export interface ProofArtifact {
   sourceHash: string;
   sourceAnchor: Anchor | null;
   parent: ProofParent | null;
+  /** Exact source and step locations saved by the server for this revision. */
+  renderedSource?: LeanSource | null;
+}
+
+/** Historical explanation, never a new source or an imported Lean declaration. */
+export interface RememberedProof {
+  runId: string;
+  title: string;
+  claim: string;
+  summary: string;
+  assumptions: string[];
+  gaps: string[];
+  statement: string | null;
+  sourceAnchor: Anchor | null;
+  verification: {
+    status: ProofCheck['status'] | 'not-checked';
+    sourceHash: string;
+    leanVersion: string | null;
+    mathlibVersion: string | null;
+    matchesCurrentRuntime: boolean;
+  };
 }
 
 export interface ProofContext {

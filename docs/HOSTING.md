@@ -44,11 +44,27 @@ rejected. Setting `HOST=0.0.0.0` disables this mode; hosted readers use authenti
 rooms. Do not expose a loopback server through a tunnel or a proxy that strips all
 forwarding headers and rewrites Host to localhost.
 
-Solo paper text, conversation and tokens stay in server memory and are excluded
-from SQLite backups. Sessions expire after an hour of inactivity and disappear on
-restart. Limits are eight sessions, 30 runs per session, two concurrent runs and
-100 starts per UTC day per process; restarting resets these counters. Ambiguous
-requests are never automatically resubmitted.
+Unsaved solo paper text and conversations stay in server memory and are excluded
+from SQLite backups. Saving a named context persists its paper text, conversation,
+proof artifacts, recorded checks and request digests in SQLite. Later work in that
+context is saved automatically. Browser references hold the access capability;
+the database stores its hash. Context names and PDF hashes do not authorize access.
+References are scoped to the PDF and API origin and are separate in the web app
+and extension. Clearing browser storage loses access references.
+
+Sessions expire after an hour of inactivity. Closing a saved session detaches it
+without deleting its context. Reopening never dispatches AI or Lean work; interrupted
+work remains unconfirmed after a restart. Multiple attached tabs share authoritative
+context state. Explicit deletion invalidates all its attached sessions and records
+a deletion tombstone. Ambiguous requests are never automatically resubmitted.
+
+The local store allows 100 named contexts, 500 questions per saved context,
+16 MB per context and 128 MB in total, including reserved space for pending
+results. It retains deletion tombstones within a 10,000-entry catalog limit.
+Unsaved sessions retain the 30-question limit. Execution is limited to eight
+attached sessions, two simultaneous AI runs and 100 starts per UTC day per
+process; restarting resets the in-memory execution counters. Full contexts remain
+readable; start a new context or delete an unused one to free capacity.
 
 ## PDF processing
 
@@ -69,7 +85,7 @@ Shared checks persist with their room, including the exact source hash, toolchai
 versions, diagnostics and measured goals. Only the requester or room owner may
 cancel an active check. Revoking that requester's access stops it. After a restart,
 interrupted checks remain unconfirmed; they are never presented as successful.
-Backups include shared proof artifacts and check results.
+Backups include shared and explicitly saved solo proof artifacts and check results.
 
 ## Backups
 
@@ -81,13 +97,14 @@ These snapshots protect against application mistakes, not disk loss.
 
 Copy snapshots to encrypted off-machine storage under your retention policy and
 verify recovery periodically. Copies contain accounts, papers, chat and historical
-membership. Deleted data remains in retained backups until expiry; revocation cannot
+membership, plus named solo contexts and their capability hashes. Deleted data
+remains in retained backups until expiry; revocation cannot
 recall downloaded copies. No external backup provider is automatically configured.
 
 ## Restore into quarantine
 
 Never replace the live database with an old snapshot and immediately reopen access.
-That could restore deleted rooms, revoked memberships, or session tokens.
+That could restore deleted rooms or contexts, revoked memberships, or access tokens.
 
 1. Stop the service; retain the current database and deletion/revocation records.
    Restore into a **new directory** with restricted permissions. Create a file
@@ -99,9 +116,17 @@ That could restore deleted rooms, revoked memberships, or session tokens.
 3. Reapply every deletion from the current `deleted_rooms` table and any newer
    records. Delete those rooms with foreign keys enabled. Without complete deletion
    records, keep the service private and review every restored room with its owner.
+   Also reapply saved-context tombstones from `solo_contexts WHERE deleted = 1`:
+   delete matching context rows in the restored database, then retain the tombstone
+   rows from the current database. Revoke every restored context capability with
+   `UPDATE solo_contexts SET capability_hash = ''` before reopening access. Older
+   snapshots must not revive deleted contexts or old bearer access. Keep retained
+   context data quarantined until its owner is verified; solo contexts have no
+   account-based recovery interface.
 4. Run `PRAGMA integrity_check`, verify PDF hashes, and test an isolated sign-in,
    PDF download and notes edit. Interrupted AI runs become uncertain on startup;
-   do not reissue them automatically. Confirm old sessions and invitations fail.
+   do not reissue them automatically. Confirm old sessions, invitations and saved
+   context capabilities fail.
 5. Rotate credentials if disclosure occurred. Remove the quarantine marker only
    after the access/deletion review. Point the service to the new database. Have
    members sign in again and issue fresh invitations.

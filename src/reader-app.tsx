@@ -974,7 +974,8 @@ export function ReaderApp({
       <div
         id="reading-companion"
         className="companion-drawer"
-        hidden={!showPanel}
+        inert={!showPanel}
+        aria-hidden={!showPanel}
         onKeyDown={(event) => {
           if (event.target instanceof Element && event.target.closest('dialog')) return;
           if (event.key === 'Escape' && !event.defaultPrevented) {

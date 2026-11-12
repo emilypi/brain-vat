@@ -26,6 +26,8 @@ and page links. PDFs without an embedded outline say so; headings are not inferr
 The bottom dock holds page navigation, zoom, **Reading options**, and **Ask**. Closing the
 companion preserves an unfinished question. The rail's theme toggle switches between
 bright cream and neutral charcoal, and remembers the choice.
+Ask eases open and closed; on narrower screens it overlays the page to preserve
+the reading size. The motion follows your system's reduced-motion preference.
 
 Scroll continuously through the PDF; nearby pages render as you reach them. Zoom
 stays visible and preserves your reading position. Select text to save a highlight
@@ -69,8 +71,9 @@ words, to open another stepwise walkthrough with a link back to its parent.
 
 Lean checks the proposed formal statement automatically when its local runtime is
 ready. A checked statement still needs review against the paper's meaning; missing
-assumptions and formalization gaps stay visible. Shared-room walkthroughs and check
-results persist. See [proof reading and runtime setup](docs/PROOFS.md).
+assumptions and formalization gaps stay visible. Shared-room walkthroughs and checks
+persist automatically. Save a named context to retain them while reading solo.
+See [proof reading and runtime setup](docs/PROOFS.md).
 
 ## Ask Astra while reading solo
 
@@ -80,10 +83,24 @@ click **Ask**; no account or reading room is required on the local server.
 paper passages, your selected passage or region, and recent conversation context.
 Answers include clickable sources. **Find passages** searches the PDF without AI.
 
-Solo conversations live in memory for this reading session. Reloading, switching
-papers, an hour of inactivity, or restarting the server ends the session. Use a
-shared room when you want a durable conversation. Failed delivery preserves the
-draft; retrying delivery uses the same request ID to avoid duplicate model calls.
+Use **Contexts** in Ask to save a named context for this PDF. Its conversation,
+proof walkthroughs, parent/prerequisite links and recorded Lean checks keep updating
+as you work. Reopen a context to continue it, or start a separate unsaved context
+for a different line of inquiry. Contexts can be renamed and deleted.
+
+Reopening loads recorded results without calling Astra or rerunning Lean, even when
+the API key is unavailable. Later questions receive relevant remembered proof
+results, with their assumptions, gaps and historical verification status. Selecting
+the same proof again reopens its existing walkthrough. Newly generated Lean proofs
+still need their own checks; saved theorems are not yet imported as Lean dependencies.
+
+Saved contexts belong to the exact PDF and server. Their access references stay in
+this browser; the server stores paper text, conversation and proof results in its
+local database and backups. Web and extension storage are separate. Clearing browser
+storage loses its references; this release has no account recovery for solo contexts.
+Unsaved conversations expire after an hour of inactivity and end on reload, switching
+papers or server restart. Failed delivery preserves the draft; retrying delivery
+uses the same request ID to avoid duplicate model calls.
 
 ## Use shared rooms
 
@@ -178,7 +195,7 @@ pnpm audit
 - `src/workspace-panel.tsx`, `src/room-notes.tsx`: accounts, invitations and Yjs notes.
 - `server/app.ts`, `server/store.ts`: authenticated API and durable shared state.
 - `server/provider.ts`, `server/evidence.ts`: Astra and evidence validation.
-- `server/solo.ts`: local, ephemeral AI sessions without an account.
+- `server/solo.ts`: local AI sessions and named contexts without an account.
 - `src/proof.ts`, `src/proof-workspace.tsx`: proof proposals and step navigation.
 - `server/proofs.ts`, `server/lean-runner.ts`: scoped checks and isolated Lean workers.
 - `lean/`, `scripts/setup-lean.mjs`: pinned Lean/Mathlib project and runtime setup.

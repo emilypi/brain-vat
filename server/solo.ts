@@ -9,6 +9,7 @@ import type {
   GeneratedAnswer,
   ProviderInput,
 } from '../src/workspace-contract.ts';
+import type { SavedContextCreated, SavedContextSummary } from '../src/saved-context.ts';
 import type { ProofCheck, ProofCheckResult } from '../src/proof.ts';
 import {
   attachProofArtifact,
@@ -19,38 +20,37 @@ import {
 } from './proofs.ts';
 import type { ProofExecutor } from './proofs.ts';
 import { ApiError } from './store.ts';
+import type { WorkspaceStore } from './store.ts';
 import { ProviderError } from './provider.ts';
+import {
+  interruptStoredContext,
+  MAX_SAVED_RUNS,
+  rememberedProofs,
+  soloPaperSchema,
+} from './solo-contexts.ts';
+import type {
+  SoloPaper,
+  StoredSoloContext,
+  StoredSoloRecord,
+} from './solo-contexts.ts';
 
-const paperSchema = z
-  .object({
-    documentId: z.string().regex(/^[a-f0-9]{64}$/),
-    title: z.string().trim().min(1).max(500),
-    pages: z
-      .array(
-        z
-          .object({
-            pageIndex: z.number().int().min(0).max(299),
-            text: z.string().max(2_000_000),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(300),
-  })
-  .strict()
-  .refine(
-    (value) =>
-      value.pages.every((page, index) => page.pageIndex === index) &&
-      value.pages.reduce((sum, page) => sum + page.text.length, 0) <= 2_000_000,
-  );
-type SoloPaper = z.infer<typeof paperSchema>;
-interface SoloSession {
+interface SoloRun {
+  run: AiRun;
+  digest: string;
+  controller: AbortController;
+}
+interface SoloState {
   id: string;
   closed: boolean;
   paper: SoloPaper;
-  expires: number;
-  runs: Map<string, { run: AiRun; digest: string; controller: AbortController }>;
+  runs: Map<string, SoloRun>;
   checks: Map<string, ProofCheck>;
+  context: SavedContextSummary | null;
+}
+interface SoloSession {
+  state: SoloState;
+  expires: number;
+  saved?: { requestId: string; name: string; result: SavedContextCreated };
 }
 
 export function localRequest(request: FastifyRequest): boolean {
@@ -71,7 +71,31 @@ export function localRequest(request: FastifyRequest): boolean {
   }
 }
 
-/** Ephemeral solo sessions are available only on an explicitly local server. */
+function bearer(request: FastifyRequest): string {
+  const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(
+    request.headers.authorization ?? '',
+  )?.[1];
+  if (!token) throw new ApiError(401, 'Reader access is missing or expired.');
+  return token;
+}
+
+function stored(state: SoloState): StoredSoloContext {
+  return {
+    paper: state.paper,
+    runs: [...state.runs.values()].map(({ run, digest }) => ({ run, digest })),
+    checks: [...state.checks.values()],
+  };
+}
+
+function publicState(state: SoloState) {
+  if (state.closed) throw new ApiError(401, 'This reading context is closed.');
+  return {
+    context: state.context,
+    runs: [...state.runs.values()].map(({ run }) => run),
+  };
+}
+
+/** Solo access remains local; saved capabilities are distinct from session tokens. */
 export async function registerSolo(
   app: FastifyInstance,
   provider: AiProvider,
@@ -79,96 +103,190 @@ export async function registerSolo(
   allowedOrigins: Set<string>,
   validate: (answer: GeneratedAnswer, pageCount: number) => GeneratedAnswer,
   proofs: ProofExecutor,
-): Promise<void> {
+  store: WorkspaceStore,
+): Promise<() => void> {
   const sessions = new Map<string, SoloSession>();
+  const contexts = new Map<string, SoloState>();
   let active = 0;
   let startedToday = 0;
   let day = new Date().toISOString().slice(0, 10);
   const actors = new WeakMap<FastifyRequest, SoloSession>();
-  const dispose = (token: string, session: SoloSession): void => {
-    session.closed = true;
-    for (const item of session.runs.values()) {
+  const actorSession = (request: FastifyRequest): SoloSession => {
+    const session = actors.get(request);
+    if (!session || session.state.closed || sessions.get(bearer(request)) !== session)
+      throw new ApiError(401, 'This reading session is closed.');
+    return session;
+  };
+  const actorState = (request: FastifyRequest): SoloState =>
+    actorSession(request).state;
+  const savedRecord = (request: FastifyRequest): StoredSoloRecord => {
+    const { id } = z.strictObject({ id: z.string().uuid() }).parse(request.params);
+    return store.soloContext(id, bearer(request));
+  };
+
+  const commit = (
+    state: SoloState,
+    change: Partial<Pick<SoloState, 'runs' | 'checks'>>,
+    name?: string,
+  ): void => {
+    if (state.closed) throw new ApiError(401, 'This reading context is closed.');
+    const next = { ...state, ...change };
+    // Commit before publishing the state or dispatching any paid/verified work.
+    if (state.context)
+      next.context = store.updateSoloContext(state.id, stored(next), name);
+    Object.assign(state, next);
+  };
+  const abortState = (state: SoloState): void => {
+    state.closed = true;
+    for (const item of state.runs.values()) {
       item.controller.abort();
-      proofs.cancel('solo:' + session.id + ':' + item.run.id);
+      proofs.cancel('solo:' + state.id + ':' + item.run.id);
     }
+    for (const [token, session] of sessions) {
+      if (session.state === state) sessions.delete(token);
+    }
+    contexts.delete(state.id);
+  };
+  const stop = (state: SoloState): void => {
+    if (state.closed) return;
+    const snapshot = stored(state);
+    if (interruptStoredContext(snapshot)) {
+      const runs = new Map(state.runs);
+      for (const entry of snapshot.runs) {
+        runs.set(entry.run.id, { ...runs.get(entry.run.id)!, ...entry });
+      }
+      try {
+        commit(state, {
+          runs,
+          checks: new Map(snapshot.checks.map((check) => [check.runId, check])),
+        });
+      } finally {
+        abortState(state);
+      }
+    } else abortState(state);
+  };
+  const detach = (token: string, session: SoloSession): void => {
     sessions.delete(token);
+    // Saved work finishes durably even if its last browser tab closes.
+    if (!session.state.context) stop(session.state);
   };
   const sweep = (): void => {
     for (const [token, session] of sessions) {
-      if (session.expires <= Date.now()) dispose(token, session);
+      if (session.expires <= Date.now()) detach(token, session);
     }
   };
   const timer = setInterval(sweep, 60_000);
   timer.unref();
-  app.addHook('onClose', async () => {
-    clearInterval(timer);
-    for (const [token, session] of sessions) dispose(token, session);
-  });
-
-  const proofRun = (session: SoloSession, runId: string): AiRun => {
-    const run = session.runs.get(runId)?.run;
+  const attach = (state: SoloState): string => {
+    if (sessions.size >= 8) throw new ApiError(429, 'Too many open solo papers.');
+    const token = randomBytes(32).toString('base64url');
+    sessions.set(token, { state, expires: Date.now() + 60 * 60_000 });
+    return token;
+  };
+  const canonical = (record: StoredSoloRecord): SoloState => {
+    const prior = contexts.get(record.summary.id);
+    if (prior) return prior;
+    // Live work always has canonical state. Uncached running records are orphaned.
+    if (interruptStoredContext(record.state))
+      record.summary = store.updateSoloContext(record.summary.id, record.state);
+    const state: SoloState = {
+      id: record.summary.id,
+      closed: false,
+      paper: record.state.paper,
+      context: record.summary,
+      runs: new Map(
+        record.state.runs.map((entry) => [
+          entry.run.id,
+          { ...entry, controller: new AbortController() },
+        ]),
+      ),
+      checks: new Map(record.state.checks.map((check) => [check.runId, check])),
+    };
+    contexts.set(state.id, state);
+    return state;
+  };
+  const updateRun = (state: SoloState, run: AiRun): void => {
+    const entry = state.runs.get(run.id)!;
+    const runs = new Map(state.runs);
+    runs.set(run.id, { ...entry, run });
+    commit(state, { runs });
+  };
+  const updateCheck = (state: SoloState, check: ProofCheck): void => {
+    const checks = new Map(state.checks);
+    checks.set(check.runId, check);
+    commit(state, { checks });
+  };
+  const proofRun = (state: SoloState, runId: string): AiRun => {
+    if (state.closed) throw new ApiError(401, 'This reading context is closed.');
+    const run = state.runs.get(runId)?.run;
     if (!run) throw new ApiError(404, 'Proof not found in this session.');
     if (run.status !== 'completed' || !run.answer?.proof || !run.answer.proofArtifact)
       throw new ApiError(409, 'A completed proof is required for verification.');
     return run;
   };
   const startCheck = async (
-    session: SoloSession,
+    state: SoloState,
     runId: string,
     sourceHash: string,
     automatic = false,
   ): Promise<ProofCheck | null> => {
-    const run = proofRun(session, runId);
+    const run = proofRun(state, runId);
     const proof = run.answer!.proof!;
     if (
       run.answer!.proofArtifact!.sourceHash !== sourceHash ||
       proofSourceHash(proof) !== sourceHash
     )
-      throw new ApiError(409, 'The requested source does not match this proof.');
+      throw new ApiError(
+        409,
+        'This is a historical proof revision. Create a new walkthrough to recheck.',
+      );
     const health = await proofs.status();
-    if (session.closed) throw new ApiError(401, 'Solo session expired.');
-    const prior = session.checks.get(runId);
+    if (state.closed) throw new ApiError(401, 'Solo session expired.');
+    const prior = state.checks.get(runId);
     if (automatic && (!health.available || prior)) return prior ?? null;
     if (prior && !(prior.status === 'unavailable' && health.available)) return prior;
     const check = newProofCheck(runId, sourceHash);
-    session.checks.set(runId, check);
+    updateCheck(state, check);
     const finish = (result: ProofCheckResult): void => {
       if (
-        !session.closed &&
-        session.checks.get(runId)?.id === check.id &&
-        session.checks.get(runId)?.status === 'running'
+        state.closed ||
+        state.checks.get(runId)?.id !== check.id ||
+        state.checks.get(runId)?.status !== 'running'
       )
-        session.checks.set(runId, {
+        return;
+      try {
+        updateCheck(state, {
           ...check,
           ...result,
           finishedAt: new Date().toISOString(),
         });
+      } catch {
+        // A failed durable write cannot publish a successful verification.
+        abortState(state);
+      }
     };
     if (!health.available) finish(proofCheckOutcome('unavailable', health.message));
-    else if (!proofs.schedule('solo:' + session.id + ':' + runId, proof, finish))
+    else if (!proofs.schedule('solo:' + state.id + ':' + runId, proof, finish))
       finish(
         proofCheckOutcome(
           'unavailable',
           'Lean verification is busy or at its daily limit. Try again later.',
         ),
       );
-    return session.checks.get(runId)!;
+    if (state.closed) throw new ApiError(503, 'Could not save verification results.');
+    return state.checks.get(runId)!;
   };
 
   await app.register(
     async (solo) => {
       solo.addHook('onRequest', async (request) => {
-        if (!enabled || !localRequest(request)) {
+        if (!enabled || !localRequest(request))
           throw new ApiError(403, 'Solo AI is available only on the local server.');
-        }
-        if (request.headers.origin && !allowedOrigins.has(request.headers.origin)) {
+        if (request.headers.origin && !allowedOrigins.has(request.headers.origin))
           throw new ApiError(403, 'Open the local reader to use solo AI.');
-        }
         sweep();
-        if (
-          request.routeOptions.url === '/api/solo/sessions' &&
-          request.method === 'POST'
-        ) {
+        const route = request.routeOptions.url;
+        if (route === '/api/solo/sessions' && request.method === 'POST') {
           if (!request.headers.origin)
             throw new ApiError(403, 'Reader origin required.');
           const origin = new URL(request.headers.origin);
@@ -179,10 +297,13 @@ export async function registerSolo(
             throw new ApiError(403, 'Use the local reader for solo AI.');
           return;
         }
-        const token = request.headers.authorization?.replace(/^Bearer /, '') ?? '';
-        const session = sessions.get(token);
-        if (!session)
-          throw new ApiError(401, 'Solo session expired. Reopen the paper.');
+        if (route?.startsWith('/api/solo/contexts/:id')) {
+          savedRecord(request);
+          return;
+        }
+        const session = sessions.get(bearer(request));
+        if (!session || session.state.closed)
+          throw new ApiError(401, 'Solo session expired. Reopen the paper or context.');
         session.expires = Date.now() + 60 * 60_000;
         actors.set(request, session);
       });
@@ -194,43 +315,101 @@ export async function registerSolo(
           config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
         },
         async (request, reply) => {
-          if (!provider.configured) throw new ApiError(503, 'Astra is not configured.');
-          if (sessions.size >= 8) throw new ApiError(429, 'Too many open solo papers.');
-          const paper = paperSchema.parse(request.body);
-          const token = randomBytes(32).toString('base64url');
-          sessions.set(token, {
+          const paper = soloPaperSchema.parse(request.body);
+          const token = attach({
             id: randomUUID(),
             closed: false,
             paper,
-            expires: Date.now() + 60 * 60_000,
+            context: null,
             runs: new Map(),
             checks: new Map(),
           });
           return reply.code(201).send({ token });
         },
       );
-
+      solo.get('/session', async (request) => {
+        const { revision } = z
+          .strictObject({ revision: z.coerce.number().int().positive().optional() })
+          .parse(request.query);
+        const state = actorState(request);
+        if (state.context && state.context.revision === revision)
+          return { context: state.context, runs: null };
+        return publicState(state);
+      });
       solo.delete('/session', async (request, reply) => {
-        const token = request.headers.authorization!.slice(7);
-        dispose(token, actors.get(request)!);
+        detach(bearer(request), actorSession(request));
+        return reply.code(204).send();
+      });
+      const nameSchema = z.string().trim().min(1).max(80);
+      solo.post('/context', async (request, reply) => {
+        const { requestId, name } = z
+          .strictObject({ requestId: z.string().uuid(), name: nameSchema })
+          .parse(request.body);
+        const session = actorSession(request);
+        if (session.saved) {
+          if (session.saved.requestId !== requestId || session.saved.name !== name)
+            throw new ApiError(409, 'This session is already saved as a context.');
+          return session.saved.result;
+        }
+        const state = session.state;
+        if (state.context)
+          throw new ApiError(
+            409,
+            'This context is already saved and updates automatically.',
+          );
+        const capability = randomBytes(32).toString('base64url');
+        const context = store.createSoloContext(
+          state.id,
+          capability,
+          name,
+          stored(state),
+        );
+        state.context = context;
+        contexts.set(state.id, state);
+        const result = { context, capability };
+        session.saved = { requestId, name, result };
+        return reply.code(201).send(result);
+      });
+      solo.post('/contexts/:id/open', async (request, reply) => {
+        const { documentId } = z
+          .strictObject({ documentId: z.string().regex(/^[a-f0-9]{64}$/) })
+          .parse(request.body);
+        const record = savedRecord(request);
+        if (record.summary.documentId !== documentId)
+          throw new ApiError(409, 'This saved context belongs to a different PDF.');
+        const state = canonical(record);
+        const token = attach(state);
+        return reply.code(201).send({ ...publicState(state), token });
+      });
+      solo.patch('/contexts/:id', async (request) => {
+        const { name } = z.strictObject({ name: nameSchema }).parse(request.body);
+        const state = canonical(savedRecord(request));
+        commit(state, {}, name);
+        return state.context;
+      });
+      solo.delete('/contexts/:id', async (request, reply) => {
+        const state = canonical(savedRecord(request));
+        store.deleteSoloContext(state.id);
+        abortState(state);
         return reply.code(204).send();
       });
 
       solo.post('/runs', async (request, reply) => {
-        const session = actors.get(request)!;
+        const state = actorState(request);
         const input = runInputSchema.strict().parse(request.body);
         const digest = createHash('sha256').update(JSON.stringify(input)).digest('hex');
-        const existing = session.runs.get(input.requestId);
+        const existing = state.runs.get(input.requestId);
         if (existing) {
           if (existing.digest !== digest) throw new ApiError(409, 'Request ID reused.');
           return existing.run;
         }
+        if (!provider.configured) throw new ApiError(503, 'Astra is not configured.');
         if (input.proofParent && input.kind !== 'proof')
           throw new ApiError(400, 'A proof parent requires a proof request.');
         if (input.proofParent && (input.selection || input.image))
           throw new ApiError(400, 'A prerequisite uses its parent proof’s source.');
         const parent = input.proofParent
-          ? session.runs.get(input.proofParent.runId)?.run
+          ? state.runs.get(input.proofParent.runId)?.run
           : undefined;
         if (input.proofParent && !parent)
           throw new ApiError(404, 'Parent proof not found in this session.');
@@ -242,22 +421,26 @@ export async function registerSolo(
           throw new ApiError(400, 'The parent proof or prerequisite is unavailable.');
         if (
           input.selection &&
-          (input.selection.documentId !== session.paper.documentId ||
-            input.selection.pageIndex >= session.paper.pages.length)
-        ) {
+          (input.selection.documentId !== state.paper.documentId ||
+            input.selection.pageIndex >= state.paper.pages.length)
+        )
           throw new ApiError(400, 'The selection belongs to another paper.');
-        }
         const today = new Date().toISOString().slice(0, 10);
         if (day !== today) {
           day = today;
           startedToday = 0;
         }
-        if (active >= 2 || startedToday >= 100 || session.runs.size >= 30) {
+        const runLimit = state.context ? MAX_SAVED_RUNS : 30;
+        if (state.runs.size >= runLimit)
+          throw new ApiError(
+            429,
+            `This context has ${runLimit} questions. Start a new context to continue.`,
+          );
+        if (active >= 2 || startedToday >= 100)
           throw new ApiError(429, 'Solo AI limit reached. Try again later.');
-        }
-        const history: ChatMessage[] = [...session.runs.values()]
+        const history: ChatMessage[] = [...state.runs.values()]
           .flatMap(({ run }) => {
-            if (!run.answer) return [];
+            if (run.status !== 'completed' || !run.answer) return [];
             return (['user', 'assistant'] as const).map((role) => ({
               id: randomUUID(),
               authorId: 'solo',
@@ -287,11 +470,22 @@ export async function registerSolo(
         const controller = new AbortController();
         const providerInput: ProviderInput = {
           ...input,
-          ...session.paper,
+          ...state.paper,
           history,
           ...(proofContext ? { proofContext } : {}),
+          ...(state.context
+            ? {
+                rememberedProofs: rememberedProofs(
+                  [...state.runs.values()].map(({ run }) => run),
+                  state.checks,
+                  input.selection?.pageIndex ?? proofContext?.sourceAnchor?.pageIndex,
+                ),
+              }
+            : {}),
         };
-        session.runs.set(run.id, { run, digest, controller });
+        const runs = new Map(state.runs);
+        runs.set(run.id, { run, digest, controller });
+        commit(state, { runs });
         active += 1;
         startedToday += 1;
         const deadline = setTimeout(() => controller.abort(), 150_000);
@@ -300,9 +494,7 @@ export async function registerSolo(
             const interrupted = new Promise<never>((_resolve, reject) => {
               controller.signal.addEventListener(
                 'abort',
-                () => {
-                  reject(new ProviderError('The request was interrupted.', true));
-                },
+                () => reject(new ProviderError('The request was interrupted.', true)),
                 { once: true },
               );
             });
@@ -310,30 +502,45 @@ export async function registerSolo(
               provider.generate(providerInput, controller.signal),
               interrupted,
             ]);
+            if (state.closed || state.runs.get(run.id)?.run.status !== 'running')
+              return;
             if (controller.signal.aborted)
               throw new ProviderError('Interrupted.', true);
-            run.answer = attachProofArtifact(
-              validate(answer, session.paper.pages.length),
-              providerInput,
-            );
-            run.status = 'completed';
-            if (run.answer.proofArtifact)
-              void startCheck(
-                session,
+            const completed: AiRun = {
+              ...run,
+              status: 'completed',
+              answer: attachProofArtifact(
+                validate(answer, state.paper.pages.length),
+                providerInput,
+              ),
+            };
+            updateRun(state, completed);
+            if (completed.answer?.proofArtifact)
+              await startCheck(
+                state,
                 run.id,
-                run.answer.proofArtifact.sourceHash,
+                completed.answer.proofArtifact.sourceHash,
                 true,
-              ).catch(() => undefined);
+              );
           } catch (error) {
-            run.status =
-              controller.signal.aborted ||
-              (error instanceof ProviderError && error.uncertain)
-                ? 'uncertain'
-                : 'failed';
-            run.error =
-              error instanceof ProviderError
-                ? error.message
-                : 'Astra could not complete this answer.';
+            if (state.closed || state.runs.get(run.id)?.run.status !== 'running')
+              return;
+            try {
+              updateRun(state, {
+                ...run,
+                status:
+                  controller.signal.aborted ||
+                  (error instanceof ProviderError && error.uncertain)
+                    ? 'uncertain'
+                    : 'failed',
+                error:
+                  error instanceof ProviderError
+                    ? error.message
+                    : 'Astra could not complete or save this answer.',
+              });
+            } catch {
+              abortState(state);
+            }
           } finally {
             active -= 1;
             clearTimeout(deadline);
@@ -342,41 +549,47 @@ export async function registerSolo(
         return reply.code(202).send(run);
       });
 
+      const paramsSchema = z.strictObject({ id: z.string().uuid() });
       solo.get('/runs/:id', async (request) => {
-        const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
-        const item = actors.get(request)!.runs.get(id);
+        const { id } = paramsSchema.parse(request.params);
+        const item = actorState(request).runs.get(id);
         if (!item) throw new ApiError(404, 'Question not found in this session.');
         return item.run;
       });
       solo.post('/runs/:id/cancel', async (request) => {
-        const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
-        const item = actors.get(request)!.runs.get(id);
+        const { id } = paramsSchema.parse(request.params);
+        const state = actorState(request);
+        const item = state.runs.get(id);
         if (!item) throw new ApiError(404, 'Question not found in this session.');
-        if (item.run.status === 'running') item.controller.abort();
-        return item.run;
+        if (item.run.status === 'running') {
+          updateRun(state, {
+            ...item.run,
+            status: 'uncertain',
+            error: 'The request was cancelled; the provider outcome is uncertain.',
+          });
+          item.controller.abort();
+        }
+        return state.runs.get(id)!.run;
       });
-      const paramsSchema = z.object({ id: z.string().uuid() });
       solo.get('/runs/:id/proof-check', async (request) => {
         const { id } = paramsSchema.parse(request.params);
-        const session = actors.get(request)!;
-        proofRun(session, id);
-        return session.checks.get(id) ?? null;
+        const state = actorState(request);
+        proofRun(state, id);
+        return state.checks.get(id) ?? null;
       });
       solo.post('/runs/:id/proof-check', async (request, reply) => {
         const { id } = paramsSchema.parse(request.params);
         const { sourceHash } = z
-          .strictObject({
-            sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
-          })
+          .strictObject({ sourceHash: z.string().regex(/^[a-f0-9]{64}$/) })
           .parse(request.body);
-        const check = await startCheck(actors.get(request)!, id, sourceHash);
+        const check = await startCheck(actorState(request), id, sourceHash);
         return reply.code(check?.status === 'running' ? 202 : 200).send(check);
       });
       solo.post('/runs/:id/proof-check/cancel', async (request) => {
         const { id } = paramsSchema.parse(request.params);
-        const session = actors.get(request)!;
-        proofRun(session, id);
-        const check = session.checks.get(id);
+        const state = actorState(request);
+        proofRun(state, id);
+        const check = state.checks.get(id);
         if (!check) throw new ApiError(404, 'No verification exists for this proof.');
         if (check.status !== 'running') return check;
         const cancelled: ProofCheck = {
@@ -384,11 +597,27 @@ export async function registerSolo(
           ...proofCheckOutcome('cancelled', 'Lean verification was cancelled.'),
           finishedAt: new Date().toISOString(),
         };
-        session.checks.set(id, cancelled);
-        proofs.cancel('solo:' + session.id + ':' + id);
+        updateCheck(state, cancelled);
+        proofs.cancel('solo:' + state.id + ':' + id);
         return cancelled;
       });
     },
     { prefix: '/api/solo' },
   );
+  return () => {
+    clearInterval(timer);
+    const states = new Set([
+      ...contexts.values(),
+      ...[...sessions.values()].map((session) => session.state),
+    ]);
+    let failure: unknown;
+    for (const state of states) {
+      try {
+        stop(state);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure) throw failure;
+  };
 }

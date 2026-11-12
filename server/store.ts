@@ -21,6 +21,16 @@ import type {
 } from '../src/workspace-contract.ts';
 import { digest, newToken } from './auth.ts';
 import type { ProofBreakdown, ProofCheck, ProofCheckResult } from '../src/proof.ts';
+import type { SavedContextSummary } from '../src/saved-context.ts';
+import {
+  interruptStoredContext,
+  MAX_CONTEXT_BYTES,
+  MAX_CONTEXT_TOTAL_BYTES,
+  MAX_CONTEXTS,
+  MAX_SAVED_RUNS,
+  reservedContextBytes,
+} from './solo-contexts.ts';
+import type { StoredSoloContext, StoredSoloRecord } from './solo-contexts.ts';
 import {
   newProofCheck,
   proofCheckOutcome,
@@ -55,6 +65,12 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS solo_contexts (
+    id TEXT PRIMARY KEY, capability_hash TEXT NOT NULL,
+    document_id TEXT NOT NULL, name TEXT NOT NULL, updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+    body TEXT NOT NULL, reserved_bytes INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS sessions (
     hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES accounts(id),
@@ -139,6 +155,131 @@ export class WorkspaceStore {
         finishedAt: new Date().toISOString(),
       });
     }
+    for (const row of this.all('SELECT * FROM solo_contexts WHERE deleted = 0')) {
+      const state = body<StoredSoloContext>(row);
+      if (interruptStoredContext(state)) this.updateSoloContext(String(row.id), state);
+    }
+  }
+
+  private soloSummary(row: Row): SavedContextSummary {
+    return {
+      id: String(row.id),
+      documentId: String(row.document_id),
+      name: String(row.name),
+      updatedAt: String(row.updated_at),
+      revision: Number(row.revision),
+    };
+  }
+
+  private soloSize(id: string, state: StoredSoloContext): [string, number] {
+    if (state.runs.length > MAX_SAVED_RUNS)
+      throw new ApiError(429, 'This context has 500 questions. Start a new context.');
+    const encoded = JSON.stringify(state);
+    const bytes = reservedContextBytes(state, encoded);
+    if (bytes > MAX_CONTEXT_BYTES)
+      throw new ApiError(
+        413,
+        'This saved context is full (16 MB including pending answers). ' +
+          'Start a new context to continue.',
+      );
+    const total = Number(
+      this.get(
+        `SELECT coalesce(sum(reserved_bytes), 0) AS bytes
+         FROM solo_contexts WHERE deleted = 0 AND id <> ?`,
+        id,
+      )?.bytes,
+    );
+    if (total + bytes > MAX_CONTEXT_TOTAL_BYTES)
+      throw new ApiError(
+        413,
+        'Saved contexts have reached the 128 MB local storage limit. ' +
+          'Delete an unused saved context to free space.',
+      );
+    return [encoded, bytes];
+  }
+
+  createSoloContext(
+    id: string,
+    capability: string,
+    name: string,
+    state: StoredSoloContext,
+  ): SavedContextSummary {
+    const counts = this.get(
+      `SELECT count(*) AS total,
+       coalesce(sum(CASE WHEN deleted = 0 THEN 1 ELSE 0 END), 0) AS active
+       FROM solo_contexts`,
+    )!;
+    if (Number(counts.active) >= MAX_CONTEXTS)
+      throw new ApiError(429, 'Delete an unused context before saving more than 100.');
+    if (Number(counts.total) >= 10_000)
+      throw new ApiError(429, 'The local context catalog has reached 10,000 entries.');
+    const [encoded, bytes] = this.soloSize(id, state);
+    const updatedAt = new Date().toISOString();
+    this.execute(
+      `INSERT INTO solo_contexts
+       (id, capability_hash, document_id, name, updated_at, revision, body,
+        reserved_bytes) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      id,
+      digest(capability),
+      state.paper.documentId,
+      name,
+      updatedAt,
+      encoded,
+      bytes,
+    );
+    return { id, documentId: state.paper.documentId, name, updatedAt, revision: 1 };
+  }
+
+  soloContext(id: string, capability: string): StoredSoloRecord {
+    const row = this.get(
+      `SELECT * FROM solo_contexts
+       WHERE id = ? AND capability_hash = ? AND deleted = 0`,
+      id,
+      digest(capability),
+    );
+    if (!row) throw new ApiError(404, 'Saved context unavailable or access invalid.');
+    return { summary: this.soloSummary(row), state: body<StoredSoloContext>(row) };
+  }
+
+  updateSoloContext(
+    id: string,
+    state: StoredSoloContext,
+    name?: string,
+  ): SavedContextSummary {
+    const row = this.get(
+      'SELECT * FROM solo_contexts WHERE id = ? AND deleted = 0',
+      id,
+    );
+    if (!row) throw new ApiError(404, 'This saved context was deleted.');
+    if (String(row.document_id) !== state.paper.documentId)
+      throw new ApiError(409, 'A saved context cannot change its PDF.');
+    const [encoded, bytes] = this.soloSize(id, state);
+    const summary: SavedContextSummary = {
+      ...this.soloSummary(row),
+      name: name ?? String(row.name),
+      updatedAt: new Date().toISOString(),
+      revision: Number(row.revision) + 1,
+    };
+    this.execute(
+      `UPDATE solo_contexts SET name = ?, updated_at = ?, revision = ?,
+       body = ?, reserved_bytes = ? WHERE id = ? AND deleted = 0`,
+      summary.name,
+      summary.updatedAt,
+      summary.revision,
+      encoded,
+      bytes,
+      id,
+    );
+    return summary;
+  }
+
+  deleteSoloContext(id: string): void {
+    // Keep a small durable tombstone; callbacks can only update, never recreate.
+    this.execute(
+      `UPDATE solo_contexts SET deleted = 1, body = '', reserved_bytes = 0,
+       document_id = '', name = '', revision = revision + 1 WHERE id = ?`,
+      id,
+    );
   }
 
   close(): void {

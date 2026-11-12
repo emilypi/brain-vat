@@ -17,6 +17,7 @@ export interface ProofRequest {
   question: string;
   parent?: ProofParent;
   selection?: Anchor;
+  regenerate?: boolean;
 }
 
 export const PROOF_QUESTION =
@@ -91,7 +92,12 @@ export function ProofWorkspace({
   const proofRuns = runs.filter((item) => item.kind === 'proof');
   const activeStep = proof?.steps[stepIndex];
   const goals = check?.steps.find((item) => item.stepId === activeStep?.id);
-  const source = proof ? renderLeanProof(proof) : null;
+  const source =
+    artifact?.renderedSource !== undefined
+      ? artifact.renderedSource
+      : proof
+        ? renderLeanProof(proof)
+        : null;
   const canCheck = !check || check.status === 'unavailable';
   const terminalCheck = check && check.status !== 'running' && !canCheck;
   const missingGoalsMessage = !source
@@ -244,7 +250,8 @@ export function ProofWorkspace({
       )}
       {configured === false && (
         <p className="muted">
-          Proof explanations need a configured Astra service. Open Workspace to connect.
+          New proof explanations need a configured Astra service. Open Workspace to
+          connect.
         </p>
       )}
       {pending && !busy && (
@@ -349,6 +356,13 @@ export function ProofWorkspace({
               <p className="metadata-label">
                 Lean checked this formal statement. Its correspondence to the paper
                 still needs review.
+              </p>
+            )}
+            {check && artifact?.renderedSource === undefined && (
+              <p className="metadata-label">
+                This older result did not save its exact Lean source. The code below is
+                reconstructed; the recorded check applies to its original source hash
+                and toolchain versions.
               </p>
             )}
             {terminalCheck && (
@@ -534,6 +548,21 @@ export function ProofWorkspace({
               <pre>
                 <code>{source.code}</code>
               </pre>
+              {!artifact?.parent && artifact?.sourceAnchor && (
+                <button
+                  className="text-button"
+                  disabled={disabled}
+                  onClick={() =>
+                    onRequest({
+                      question: run!.question,
+                      selection: artifact.sourceAnchor!,
+                      regenerate: true,
+                    })
+                  }
+                >
+                  Generate a new walkthrough
+                </button>
+              )}
             </details>
           )}
         </>
