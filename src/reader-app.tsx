@@ -90,6 +90,7 @@ export function ReaderApp({
   const [rotation, setRotation] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(null);
   const [selection, setSelection] = useState<Anchor | null>(null);
+  const [selectionTarget, setSelectionTarget] = useState<Anchor | null>(null);
   const [definitionTarget, setDefinitionTarget] = useState<DefinitionTarget | null>(
     null,
   );
@@ -687,6 +688,10 @@ export function ReaderApp({
                   setSelection(anchor);
                   setDefinitionTarget(null);
                   setNotice('');
+                  if (anchor && selectionMode) {
+                    setSelectionTarget(anchor);
+                    setShowPanel(true);
+                  }
                 }}
               />
             ) : (
@@ -992,6 +997,7 @@ export function ReaderApp({
           key={sessionId}
           room={room.connection}
           pdfDocument={pdf.document}
+          selectionTarget={selection === selectionTarget ? selectionTarget : null}
           proofTarget={
             paper?.id === proofTarget?.anchor.documentId &&
             selection === proofTarget?.anchor

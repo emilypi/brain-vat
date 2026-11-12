@@ -38,6 +38,8 @@ extracted text may lose mathematical layout, so citations return to the PDF.
 Use the **Highlight tool** in the dock when ordinary text selection is awkward.
 **Text** snaps a click to one word or selects words inside a drawn box, keeping
 neighboring columns out. **Area** captures an equation, figure, or scanned passage.
+Finishing a precision selection opens the companion and shows the selected words
+or an image preview of the area. Refining the box updates that preview locally.
 A 2.5× preview appears while drawing or resizing. Drag the box to move it, or use
 its eight handles to refine the edges. Focus the box or a handle and use arrow
 keys for one-pixel adjustments; Shift increases the step to ten pixels. Escape

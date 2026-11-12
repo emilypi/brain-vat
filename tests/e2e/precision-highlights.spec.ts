@@ -33,17 +33,25 @@ test('snap to one column, refine words, and preserve a highlight across zoom', a
   });
   await expect(page.locator('.selection-magnifier')).toBeVisible();
   await expect(page.locator('.snapped-word')).toHaveCount(6);
+  await expect(
+    page.getByRole('complementary', { name: 'Reading companion' }),
+  ).toBeHidden();
   await page.screenshot({ path: 'test-results/precision-magnifier.png' });
   await page.mouse.up();
   await expect(page.getByText('6 words selected', { exact: true })).toBeVisible();
   await page.screenshot({ path: 'test-results/precision-selection.png' });
-  await page.getByRole('button', { name: 'Ask about selection' }).click();
+  await expect(
+    page.getByRole('complementary', { name: 'Reading companion' }),
+  ).toBeVisible();
   await expect(page.locator('.selection-quote')).toHaveText(
     'Alpha precise words Second selected line',
   );
   await page.getByRole('button', { name: 'Close reading companion' }).click();
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(page.getByTestId('pdf-page')).toHaveAttribute('data-ready', 'true');
+  await expect(
+    page.getByRole('complementary', { name: 'Reading companion' }),
+  ).toBeHidden();
   await expect(
     page.getByRole('button', { name: 'Resize selection right', exact: true }),
   ).toBeVisible();
@@ -69,15 +77,15 @@ test('click a word, then use resize handles and keyboard nudges', async ({ page 
   });
   await page.mouse.click(word.x + word.width / 2, word.y + word.height / 2);
   await expect(page.getByTestId('selected-highlight')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Ask about selection' }).click();
   await expect(page.locator('.selection-quote')).toHaveText('precise');
-  await page.getByRole('button', { name: 'Close reading companion' }).click();
+  await expect(page.locator('.selection-quote')).toBeVisible();
   const handle = page.getByRole('button', {
     name: 'Resize selection right',
     exact: true,
   });
   for (let count = 0; count < 6; count += 1) await handle.press('Shift+ArrowRight');
   await expect(page.getByTestId('selected-highlight')).toHaveCount(2);
+  await expect(page.locator('.selection-quote')).toHaveText('precise words');
   const before = await page.locator('.precision-box').boundingBox();
   await page.getByRole('button', { name: 'Move selection box' }).press('ArrowDown');
   const after = await page.locator('.precision-box').boundingBox();
@@ -107,8 +115,8 @@ test('select text precisely on an intrinsically rotated, cropped PDF', async ({
   await page.mouse.move(text.x + text.width + 3, text.y + text.height + 3);
   await page.mouse.up();
   await expect(page.getByTestId('selected-highlight')).toHaveCount(3);
-  await page.getByRole('button', { name: 'Ask about selection' }).click();
   await expect(page.locator('.selection-quote')).toHaveText('Alpha precise words');
+  await expect(page.locator('.selection-quote')).toBeVisible();
   await page.getByRole('button', { name: 'Save highlight' }).click();
   await expect(page.getByTestId('saved-highlight')).toHaveCount(3);
   await page.reload();
@@ -127,6 +135,9 @@ test('Escape cancels a drawing without creating a highlight', async ({ page }) =
   await expect(page.locator('.selection-magnifier')).toHaveCount(0);
   await expect(page.locator('.precision-box')).toHaveCount(0);
   await expect(page.getByTestId('selected-highlight')).toHaveCount(0);
+  await expect(
+    page.getByRole('complementary', { name: 'Reading companion' }),
+  ).toBeHidden();
 });
 
 test('adjust scanned-page areas and retain the box after rotation', async ({
@@ -147,6 +158,9 @@ test('adjust scanned-page areas and retain the box after rotation', async ({
   await page.mouse.down();
   await page.mouse.move(bounds.x + 230, bounds.y + 350);
   await page.mouse.up();
+  const preview = page.getByRole('img', { name: 'Selected region from page 1' });
+  await expect(preview).toBeVisible();
+  const originalPreview = await preview.getAttribute('src');
   const handle = page.getByRole('button', { name: 'Resize selection bottom right' });
   const point = await handle.boundingBox();
   if (!point) throw Error('Missing resize handle');
@@ -154,6 +168,8 @@ test('adjust scanned-page areas and retain the box after rotation', async ({
   await page.mouse.down();
   await page.mouse.move(point.x + 50, point.y + 35);
   await page.mouse.up();
+  await expect(preview).toBeVisible();
+  await expect(preview).not.toHaveAttribute('src', originalPreview!);
   const before = await page.locator('.precision-box').boundingBox();
   expect(before!.width).toBeGreaterThan(170);
   await page.getByRole('button', { name: 'Reading options' }).click();
