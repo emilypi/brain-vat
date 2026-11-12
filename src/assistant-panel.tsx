@@ -33,6 +33,7 @@ interface AssistantPanelProps {
   context: AssistantContext | null;
   indexing: boolean;
   onNavigate: (pageIndex: number) => void;
+  onLocateProof?: ((anchor: Anchor | null) => void) | undefined;
   onSave: () => void;
   notice: string;
   showThemeToggle?: boolean;
@@ -64,6 +65,7 @@ function LocalAssistantPanel({
   context,
   indexing,
   onNavigate,
+  onLocateProof,
   onSave,
   notice,
   showThemeToggle = false,
@@ -572,6 +574,7 @@ function LocalAssistantPanel({
           onRequest={requestProof}
           onOpen={setProofRunId}
           onNavigate={onNavigate}
+          onLocate={onLocateProof}
           onCancel={(run) => void cancel(run)}
           onRetry={() => {
             if (pending) void ask(pending.question, pending);
@@ -856,6 +859,7 @@ function SharedAssistantPanel({
   pdfDocument,
   indexing,
   onNavigate,
+  onLocateProof,
   onSave,
   notice,
   showThemeToggle = false,
@@ -1395,6 +1399,7 @@ function SharedAssistantPanel({
           onRequest={requestProof}
           onOpen={setProofRunId}
           onNavigate={onNavigate}
+          onLocate={onLocateProof}
           onCancel={cancelRun}
           onRetry={() => {
             if (pending) void deliver(pending);

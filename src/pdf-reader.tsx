@@ -27,6 +27,7 @@ interface PdfReaderProps {
   showSources: boolean;
   highlights: Highlight[];
   selection: Anchor | null;
+  inspectedAnchor: Anchor | null;
   onSelect: (anchor: Anchor | null) => void;
   onDefine: (anchor: Anchor) => void;
   onNavigate: (pageIndex: number) => void;
@@ -80,6 +81,7 @@ export function PdfReader({
   showSources,
   highlights,
   selection,
+  inspectedAnchor,
   onSelect,
   onDefine,
   onNavigate,
@@ -241,6 +243,7 @@ export function PdfReader({
                   showSources={showSources}
                   highlights={highlights}
                   selection={selection}
+                  inspectedAnchor={inspectedAnchor}
                   onSelect={onSelect}
                   onDefine={onDefine}
                   onNavigate={onNavigate}

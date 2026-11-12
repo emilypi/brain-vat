@@ -21,6 +21,8 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { AssistantPanel } from './assistant-panel';
+import { CompanionResize, DEFAULT_COMPANION_WIDTH } from './companion-resize';
+import type { CSSProperties } from 'react';
 import type { DefinitionTarget } from './inline-definition';
 import type { ProofTarget } from './proof-workspace';
 import { ThemeToggle } from './theme-toggle';
@@ -101,6 +103,18 @@ export function ReaderApp({
   }, []);
   const closeDefinition = useCallback(() => setDefinitionTarget(null), []);
   const [proofTarget, setProofTarget] = useState<ProofTarget | null>(null);
+  const [proofAnchor, setProofAnchor] = useState<Anchor | null>(null);
+  const locateProof = useCallback(
+    (anchor: Anchor | null): void => {
+      if (anchor && anchor.documentId !== paper?.id) return;
+      setProofAnchor(anchor);
+      if (anchor) {
+        setEnhanced(false);
+        navigateToPage(anchor.pageIndex);
+      }
+    },
+    [paper?.id, navigateToPage],
+  );
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -110,6 +124,8 @@ export function ReaderApp({
     return new URLSearchParams(location.search).get('source') ?? '';
   });
   const [showPanel, setShowPanel] = useState(false);
+  const [companionWidth, setCompanionWidth] = useState(DEFAULT_COMPANION_WIDTH);
+  const [resizingCompanion, setResizingCompanion] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [showSources, setShowSources] = useState(true);
@@ -138,6 +154,7 @@ export function ReaderApp({
       setError('');
       setPaper(next);
       setSelection(null);
+      setProofAnchor(null);
       setHighlights([]);
       setRoomId(null);
       const nextSession = crypto.randomUUID();
@@ -169,6 +186,7 @@ export function ReaderApp({
       const generation = ++openGeneration.current;
       const nextSession = crypto.randomUUID();
       setPaper(null);
+      setProofAnchor(null);
       setSelection(null);
       setHighlights([]);
       setError('');
@@ -413,13 +431,21 @@ export function ReaderApp({
     openGeneration.current += 1;
     setRoomId(null);
     setPaper(null);
+    setProofAnchor(null);
     setSelection(null);
     setHighlights([]);
     history.replaceState(null, '', location.pathname);
     void environment.clear(crypto.randomUUID()).catch(report);
   };
   return (
-    <div className={'reader-app' + (showPanel ? '' : ' panel-hidden')}>
+    <div
+      className={
+        'reader-app' +
+        (showPanel ? '' : ' panel-hidden') +
+        (resizingCompanion ? ' companion-resizing' : '')
+      }
+      style={{ '--companion-width': companionWidth + 'px' } as CSSProperties}
+    >
       <input
         ref={fileInput}
         type="file"
@@ -685,10 +711,14 @@ export function ReaderApp({
                 selectionMode={selectionMode}
                 highlights={visibleHighlights}
                 selection={selection}
+                inspectedAnchor={
+                  showPanel && proofAnchor?.documentId === paper.id ? proofAnchor : null
+                }
                 onDefine={defineSelection}
                 onNavigate={navigateToPage}
                 onSelect={(anchor) => {
                   setSelection(anchor);
+                  setProofAnchor(null);
                   setDefinitionTarget(null);
                   setNotice('');
                   if (anchor && selectionMode) {
@@ -987,6 +1017,11 @@ export function ReaderApp({
           }
         }}
       >
+        <CompanionResize
+          width={companionWidth}
+          onResize={setCompanionWidth}
+          onDragging={setResizingCompanion}
+        />
         <button
           className="icon-button companion-close"
           aria-label="Close reading companion"
@@ -1029,6 +1064,7 @@ export function ReaderApp({
           }
           indexing={pdf.indexing}
           onNavigate={navigateToPage}
+          onLocateProof={locateProof}
           onSave={saveSelection}
           notice={notice}
         />

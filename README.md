@@ -28,6 +28,9 @@ and page links. PDFs without an embedded outline say so; headings are not inferr
 The bottom dock holds page navigation, zoom, **Reading options**, and **Ask**. Closing the
 companion preserves an unfinished question. The rail's theme toggle switches between
 bright cream and neutral charcoal, and remembers the choice.
+Rose and lilac accents connect controls, source links and translucent PDF highlights.
+Drag the companion's divider to make room for a proof; its arrow keys resize it,
+and Enter or a double-click restores the default width.
 Ask eases open and closed; on narrower screens it overlays the page to preserve
 the reading size. The motion follows your system's reduced-motion preference.
 
@@ -36,7 +39,7 @@ background. Scroll continuously through the PDF; nearby pages render as you reac
 stays visible and preserves your reading position. Select text to save a highlight
 or ask about it. **Reading options** contains rotation, **Region** capture, source
 visibility and **Enhanced reading**. PDFs fit the available width by default;
-saved highlights follow zoom and rotation. Blue underlines mark source links,
+saved highlights follow zoom and rotation. Lilac underlines mark source links,
 with reference previews on hover or keyboard focus. Enhanced reading provides a text/guide view;
 extracted text may lose mathematical layout, so citations return to the PDF.
 
@@ -67,8 +70,15 @@ conversation. Failed delivery can be retried with the original request ID.
 ## Work through a proof
 
 Highlight a proof, claim, or equation and choose **Break down proof**. The companion's
-**Proofs** view gives a summary, assumptions and individual steps. Expand **Lean
+**Proofs** view gives a summary and a numbered argument outline. Choose a step to
+enter its explanation, use previous/next to continue, or return to **Proof outline**.
+Following a prerequisite and returning restores your place in the parent proof.
+**Highlighted passage** locates its original PDF region with a lilac outline.
+Expand **Lean
 tactic and goals** to see each proposed tactic and the states observed by Lean.
+Lean source has line numbers and restrained syntax coloring; unproved `sorry` steps
+remain visibly marked. The panel's outline and focused detail are inspired by the
+[Literature Links proof viewer](https://mathlib-initiative.github.io/seifert-van-kampen-tauceti/pdf-overlay/viewer/index.html).
 Use **Explain** on a prerequisite, or ask about background knowledge in your own
 words, to open another stepwise walkthrough with a link back to its parent.
 
