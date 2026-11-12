@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import {
   ArrowUp,
@@ -16,6 +16,8 @@ import { ThemeToggle } from './theme-toggle';
 import { AnswerContent } from './enhanced-reader';
 import { InlineDefinition, definitionKey } from './inline-definition';
 import type { DefinitionTarget } from './inline-definition';
+import { ProofWorkspace, PROOF_QUESTION } from './proof-workspace';
+import type { ProofRequest, ProofTarget } from './proof-workspace';
 import { runInputSchema } from './workspace-contract';
 import type { AssistantContext } from './bridge';
 import type { Anchor, Evidence, PageBox, Transform } from './document';
@@ -37,6 +39,7 @@ interface AssistantPanelProps {
   definitionTarget?: DefinitionTarget | null;
   onCloseDefinition?: () => void;
   onDefine?: (anchor: Anchor) => void;
+  proofTarget?: ProofTarget | null;
 }
 
 function submitOnEnter(
@@ -65,6 +68,7 @@ function LocalAssistantPanel({
   definitionTarget,
   onCloseDefinition,
   onDefine,
+  proofTarget,
 }: AssistantPanelProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -78,6 +82,10 @@ function LocalAssistantPanel({
   const [definitionErrorKey, setDefinitionErrorKey] = useState<string | null>(null);
   const [mode, setMode] = useState<'ask' | 'search'>('ask');
   const [runs, setRuns] = useState<AiRun[]>([]);
+  const [proofOpen, setProofOpen] = useState(false);
+  const [proofRunId, setProofRunId] = useState<string | null>(null);
+  const [soloClient, setSoloClient] = useState<WorkspaceClient | null>(null);
+  const handledProofTarget = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState<RunInput | null>(null);
@@ -104,6 +112,10 @@ function LocalAssistantPanel({
     setDefinitionRequestIds({});
     setDefinitionErrorKey(null);
     setRuns([]);
+    setProofRunId(null);
+    setProofOpen(false);
+    setSoloClient(null);
+    handledProofTarget.current = null;
     setError('');
     setPending(null);
     setBusy(false);
@@ -130,9 +142,9 @@ function LocalAssistantPanel({
     };
   }, [service.client, documentId]);
 
-  const acceptRun = (run: AiRun): void => {
+  const acceptRun = useCallback((run: AiRun): void => {
     setRuns((current) => [...current.filter((item) => item.id !== run.id), run]);
-  };
+  }, []);
 
   useEffect(() => {
     const running = runs.filter((run) => run.status === 'running');
@@ -177,78 +189,138 @@ function LocalAssistantPanel({
     if (element) element.scrollTop = element.scrollHeight;
   }, [runs.length, finishedCount]);
 
-  const ask = async (question: string, retry?: RunInput): Promise<void> => {
-    if (!context || !aiAvailable || indexing || !question.trim() || inFlight.current) {
-      return;
-    }
-    const current = generation.current;
-    inFlight.current = true;
-    setBusy(true);
-    setError('');
-    setDefinitionErrorKey(null);
-    try {
-      const image =
-        !retry && selection?.kind === 'region' && pdfDocument
-          ? await captureRegion(pdfDocument, selection)
-          : null;
-      const input =
-        retry ??
-        runInputSchema.parse({
-          requestId: crypto.randomUUID(),
-          question,
-          kind: 'question',
-          selection: selection ?? null,
-          image,
-          externalQuery: null,
-        });
-      if (current !== generation.current) return;
-      if (input.kind === 'definition' && input.selection) {
-        const key = definitionKey(input.selection, input.externalQuery);
-        setDefinitionErrorKey(key);
-        setDefinitionRequestIds((current) => ({ ...current, [key]: input.requestId }));
+  const ask = useCallback(
+    async (
+      question: string,
+      retry?: RunInput,
+      proofRequest?: ProofRequest,
+    ): Promise<void> => {
+      if (
+        !context ||
+        !aiAvailable ||
+        indexing ||
+        !question.trim() ||
+        inFlight.current
+      ) {
+        return;
       }
-      if (!solo.current) {
-        const session = await service.client.request<{ token: string }>(
-          '/solo/sessions',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              documentId: context.documentId,
-              title: context.title,
-              pages: context.pages,
-            }),
-          },
-        );
-        const client = new WorkspaceClient(service.client.baseUrl, session.token);
-        if (current !== generation.current) {
-          void client
-            .request('/solo/session', { method: 'DELETE' })
-            .catch(() => undefined);
-          return;
+      const current = generation.current;
+      inFlight.current = true;
+      setBusy(true);
+      setError('');
+      setDefinitionErrorKey(null);
+      const capturedSelection = proofRequest?.parent
+        ? null
+        : (proofRequest?.selection ?? selection ?? null);
+      try {
+        const image =
+          !retry && capturedSelection?.kind === 'region' && pdfDocument
+            ? await captureRegion(pdfDocument, capturedSelection)
+            : null;
+        const input =
+          retry ??
+          runInputSchema.parse({
+            requestId: crypto.randomUUID(),
+            question,
+            kind: proofRequest ? 'proof' : 'question',
+            selection: capturedSelection,
+            image,
+            externalQuery: null,
+            ...(proofRequest?.parent ? { proofParent: proofRequest.parent } : {}),
+          });
+        if (current !== generation.current) return;
+        if (input.kind === 'definition' && input.selection) {
+          const key = definitionKey(input.selection, input.externalQuery);
+          setDefinitionErrorKey(key);
+          setDefinitionRequestIds((current) => ({
+            ...current,
+            [key]: input.requestId,
+          }));
         }
-        solo.current = client;
+        if (!solo.current) {
+          const session = await service.client.request<{ token: string }>(
+            '/solo/sessions',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                documentId: context.documentId,
+                title: context.title,
+                pages: context.pages,
+              }),
+            },
+          );
+          const client = new WorkspaceClient(service.client.baseUrl, session.token);
+          if (current !== generation.current) {
+            void client
+              .request('/solo/session', { method: 'DELETE' })
+              .catch(() => undefined);
+            return;
+          }
+          solo.current = client;
+          setSoloClient(client);
+        }
+        setPending(input);
+        const run = await solo.current.request<AiRun>('/solo/runs', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        });
+        if (current !== generation.current) return;
+        acceptRun(run);
+        if (input.kind === 'proof') {
+          setProofRunId(run.id);
+          setProofOpen(true);
+        }
+        setPending(null);
+        setQuery((value) => (value.trim() === question.trim() ? '' : value));
+      } catch (reason) {
+        if (current === generation.current)
+          setError(
+            reason instanceof Error ? reason.message : 'Could not send this question.',
+          );
+      } finally {
+        if (current === generation.current) {
+          setBusy(false);
+          inFlight.current = false;
+        }
       }
-      setPending(input);
-      const run = await solo.current.request<AiRun>('/solo/runs', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      });
-      if (current !== generation.current) return;
-      acceptRun(run);
-      setPending(null);
-      setQuery((value) => (value.trim() === question.trim() ? '' : value));
-    } catch (reason) {
-      if (current === generation.current)
-        setError(
-          reason instanceof Error ? reason.message : 'Could not send this question.',
-        );
-    } finally {
-      if (current === generation.current) {
-        setBusy(false);
-        inFlight.current = false;
-      }
-    }
-  };
+    },
+    [acceptRun, aiAvailable, context, indexing, pdfDocument, selection, service.client],
+  );
+
+  const requestProof = useCallback(
+    (request: ProofRequest): void => {
+      setProofOpen(true);
+      if (busy || pending) return;
+      void ask(request.question, undefined, request);
+    },
+    [ask, busy, pending],
+  );
+
+  useEffect(() => {
+    if (
+      !proofTarget ||
+      handledProofTarget.current === proofTarget.id ||
+      proofTarget.anchor.documentId !== documentId ||
+      !healthChecked ||
+      indexing ||
+      busy ||
+      pending
+    )
+      return;
+    handledProofTarget.current = proofTarget.id;
+    setProofOpen(true);
+    if (aiAvailable)
+      requestProof({ question: PROOF_QUESTION, selection: proofTarget.anchor });
+  }, [
+    proofTarget,
+    documentId,
+    healthChecked,
+    indexing,
+    busy,
+    aiAvailable,
+    pending,
+    requestProof,
+  ]);
 
   const cancel = async (run: AiRun): Promise<void> => {
     const current = generation.current;
@@ -286,14 +358,30 @@ function LocalAssistantPanel({
           </div>
           {showThemeToggle && <ThemeToggle />}
         </div>
-        <h2>{asking ? 'Ask about this paper.' : 'Find it in the paper.'}</h2>
+        <h2>
+          {proofOpen
+            ? 'Follow the proof.'
+            : asking
+              ? 'Ask about this paper.'
+              : 'Find it in the paper.'}
+        </h2>
         <p>
-          {asking
-            ? 'Work through an idea without losing your place.'
-            : 'Search the text and follow the evidence.'}
+          {proofOpen
+            ? 'Understand the argument, one step at a time.'
+            : asking
+              ? 'Work through an idea without losing your place.'
+              : 'Search the text and follow the evidence.'}
         </p>
+        <div className="proof-panel-tabs" aria-label="Companion view">
+          <button aria-pressed={!proofOpen} onClick={() => setProofOpen(false)}>
+            Conversation
+          </button>
+          <button aria-pressed={proofOpen} onClick={() => setProofOpen(true)}>
+            Proofs
+          </button>
+        </div>
       </header>
-      <div className="panel-scroll" ref={conversation}>
+      <div className="panel-scroll" ref={conversation} hidden={proofOpen}>
         <div className="mode-note">
           <BookOpen size={15} />
           <span>
@@ -322,6 +410,15 @@ function LocalAssistantPanel({
                     </button>
                     <button className="text-button" onClick={onSave}>
                       <Highlighter size={14} /> Save highlight
+                    </button>
+                    <button
+                      className="text-button"
+                      disabled={!aiAvailable || indexing || busy || Boolean(pending)}
+                      onClick={() =>
+                        requestProof({ question: PROOF_QUESTION, selection })
+                      }
+                    >
+                      Break down proof
                     </button>
                     {selection.quote && onDefine && (
                       <button
@@ -441,6 +538,10 @@ function LocalAssistantPanel({
                   pageCount={context.pages.length}
                   onNavigate={onNavigate}
                   onCancel={(item) => void cancel(item)}
+                  onOpenProof={(id) => {
+                    setProofRunId(id);
+                    setProofOpen(true);
+                  }}
                 />
               ))}
             </section>
@@ -453,8 +554,41 @@ function LocalAssistantPanel({
           </div>
         )}
       </div>
+      {proofOpen && context && (
+        <ProofWorkspace
+          run={
+            runs.find((item) => item.id === proofRunId) ??
+            [...runs].reverse().find((item) => item.kind === 'proof') ??
+            null
+          }
+          runs={runs}
+          client={soloClient}
+          basePath="/solo"
+          selection={selection ?? null}
+          lean={health?.lean}
+          configured={healthChecked ? aiAvailable : null}
+          disabled={
+            !aiAvailable ||
+            indexing ||
+            busy ||
+            Boolean(pending) ||
+            runs.some((item) => item.kind === 'proof' && item.status === 'running')
+          }
+          busy={busy}
+          error={error}
+          pending={Boolean(pending)}
+          onRequest={requestProof}
+          onOpen={setProofRunId}
+          onNavigate={onNavigate}
+          onCancel={(run) => void cancel(run)}
+          onRetry={() => {
+            if (pending) void ask(pending.question, pending);
+          }}
+        />
+      )}
       <form
         className="composer"
+        hidden={proofOpen}
         onSubmit={(event) => {
           event.preventDefault();
           if (asking) void ask(query);
@@ -597,6 +731,7 @@ interface SharedRunCardProps {
   pageCount: number;
   onCancel: (run: AiRun) => void;
   onNavigate: (pageIndex: number) => void;
+  onOpenProof?: (runId: string) => void;
 }
 
 function SharedRunCard({
@@ -605,6 +740,7 @@ function SharedRunCard({
   pageCount,
   onCancel,
   onNavigate,
+  onOpenProof,
 }: SharedRunCardProps): React.JSX.Element {
   return (
     <article className="shared-run" aria-label={run.kind + ' request'}>
@@ -631,11 +767,18 @@ function SharedRunCard({
         </button>
       )}
       {run.status === 'completed' && run.answer && (
-        <AnswerContent
-          answer={run.answer}
-          pageCount={pageCount}
-          onNavigate={onNavigate}
-        />
+        <>
+          <AnswerContent
+            answer={run.answer}
+            pageCount={pageCount}
+            onNavigate={onNavigate}
+          />
+          {run.answer.proof && onOpenProof && (
+            <button className="text-button" onClick={() => onOpenProof(run.id)}>
+              Open proof walkthrough
+            </button>
+          )}
+        </>
       )}
     </article>
   );
@@ -653,6 +796,7 @@ function SharedAssistantPanel({
   definitionTarget,
   onCloseDefinition,
   onDefine,
+  proofTarget,
 }: SharedAssistantProps): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'ask' | 'discuss'>('ask');
@@ -668,6 +812,9 @@ function SharedAssistantPanel({
   const [error, setError] = useState('');
   const [pending, setPending] = useState<PendingRun | null>(null);
   const [latestRun, setLatestRun] = useState<AiRun | null>(null);
+  const [proofOpen, setProofOpen] = useState(false);
+  const [proofRunId, setProofRunId] = useState<string | null>(null);
+  const handledProofTarget = useRef<string | null>(null);
   const [definitionOpen, setDefinitionOpen] = useState(false);
   const [definitionId, setDefinitionId] = useState<string | null>(null);
   const [localEvidence, setLocalEvidence] = useState<Evidence[]>([]);
@@ -708,100 +855,166 @@ function SharedAssistantPanel({
     else dialog.current?.close();
   }, [definitionOpen]);
 
-  const deliver = (request: PendingRun): Promise<void> => {
-    if (delivery.current) return delivery.current;
-    const current = generation.current;
-    const task = (async () => {
-      if (request.roomId !== roomId || request.documentId !== documentId) return;
+  const deliver = useCallback(
+    (request: PendingRun): Promise<void> => {
+      if (delivery.current) return delivery.current;
+      const current = generation.current;
+      const task = (async () => {
+        if (request.roomId !== roomId || request.documentId !== documentId) return;
+        setBusy(true);
+        setError('');
+        setDefinitionErrorKey(null);
+        if (request.input.kind === 'definition' && request.input.selection) {
+          const key = definitionKey(
+            request.input.selection,
+            request.input.externalQuery,
+          );
+          setDefinitionErrorKey(key);
+          setDefinitionRequestIds((current) => ({
+            ...current,
+            [key]: request.input.requestId,
+          }));
+        }
+        try {
+          const run = await room.client.request<AiRun>(`/rooms/${roomId}/runs`, {
+            method: 'POST',
+            body: JSON.stringify(request.input),
+          });
+          if (generation.current !== current) return;
+          setLatestRun(run);
+          setPending(null);
+          if (request.input.kind === 'question') {
+            setQuery((current) =>
+              current.trim() === request.input.question.trim() ? '' : current,
+            );
+          }
+          if (request.input.kind === 'definition') setDefinitionId(run.id);
+          if (request.input.kind === 'proof') {
+            setProofRunId(run.id);
+            setProofOpen(true);
+          }
+          await room.refresh();
+        } catch (reason) {
+          if (generation.current === current) {
+            setError(
+              reason instanceof Error ? reason.message : 'Request delivery failed.',
+            );
+          }
+        } finally {
+          if (generation.current === current) setBusy(false);
+          delivery.current = null;
+        }
+      })();
+      delivery.current = task;
+      return task;
+    },
+    [documentId, roomId, room],
+  );
+
+  const requestAnswer = useCallback(
+    (kind: RunInput['kind'], question: string, proofRequest?: ProofRequest): void => {
+      if (busy || pending || !question.trim() || status?.configured === false) return;
+      const current = generation.current;
+      const capturedRoom = roomId;
+      const capturedDocument = documentId;
+      const capturedSelection =
+        kind === 'guide' || proofRequest?.parent
+          ? null
+          : (proofRequest?.selection ?? selection);
+      const capturedExternal =
+        kind !== 'proof' && externalEnabled ? externalQuery.trim() || null : null;
+      if (kind !== 'proof' && externalEnabled && !capturedExternal) {
+        setError('Enter a separate external search query, or turn off outside search.');
+        return;
+      }
+      if (
+        room.state.room.documentId !== capturedDocument ||
+        (capturedSelection && capturedSelection.documentId !== capturedDocument)
+      ) {
+        setError('Open this workspace’s paper before sending a question.');
+        return;
+      }
       setBusy(true);
       setError('');
-      setDefinitionErrorKey(null);
-      if (request.input.kind === 'definition' && request.input.selection) {
-        const key = definitionKey(request.input.selection, request.input.externalQuery);
-        setDefinitionErrorKey(key);
-        setDefinitionRequestIds((current) => ({
-          ...current,
-          [key]: request.input.requestId,
-        }));
-      }
-      try {
-        const run = await room.client.request<AiRun>(`/rooms/${roomId}/runs`, {
-          method: 'POST',
-          body: JSON.stringify(request.input),
-        });
-        if (generation.current !== current) return;
-        setLatestRun(run);
-        setPending(null);
-        if (request.input.kind === 'question') {
-          setQuery((current) =>
-            current.trim() === request.input.question.trim() ? '' : current,
-          );
+      void (async () => {
+        let image: string | null = null;
+        if (capturedSelection?.kind === 'region') {
+          if (!pdfDocument)
+            throw new Error('Wait for the PDF before asking about a region.');
+          image = await captureRegion(pdfDocument, capturedSelection);
         }
-        if (request.input.kind === 'definition') setDefinitionId(run.id);
-        await room.refresh();
-      } catch (reason) {
+        if (generation.current !== current) return;
+        const input = runInputSchema.parse({
+          requestId: crypto.randomUUID(),
+          question,
+          kind,
+          selection: capturedSelection,
+          image,
+          externalQuery: capturedExternal,
+          ...(proofRequest?.parent ? { proofParent: proofRequest.parent } : {}),
+        });
+        const request = { roomId: capturedRoom, documentId: capturedDocument, input };
+        setPending(request);
+        await deliver(request);
+      })().catch((reason: unknown) => {
         if (generation.current === current) {
           setError(
-            reason instanceof Error ? reason.message : 'Request delivery failed.',
+            reason instanceof Error
+              ? reason.message
+              : 'Could not prepare this question.',
           );
+          setBusy(false);
         }
-      } finally {
-        if (generation.current === current) setBusy(false);
-        delivery.current = null;
-      }
-    })();
-    delivery.current = task;
-    return task;
-  };
-
-  const requestAnswer = (kind: RunInput['kind'], question: string): void => {
-    if (busy || pending || !question.trim() || status?.configured === false) return;
-    const current = generation.current;
-    const capturedRoom = roomId;
-    const capturedDocument = documentId;
-    const capturedSelection = kind === 'guide' ? null : selection;
-    const capturedExternal = externalEnabled ? externalQuery.trim() || null : null;
-    if (externalEnabled && !capturedExternal) {
-      setError('Enter a separate external search query, or turn off outside search.');
-      return;
-    }
-    if (
-      room.state.room.documentId !== capturedDocument ||
-      (capturedSelection && capturedSelection.documentId !== capturedDocument)
-    ) {
-      setError('Open this workspace’s paper before sending a question.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    void (async () => {
-      let image: string | null = null;
-      if (capturedSelection?.kind === 'region') {
-        if (!pdfDocument)
-          throw new Error('Wait for the PDF before asking about a region.');
-        image = await captureRegion(pdfDocument, capturedSelection);
-      }
-      if (generation.current !== current) return;
-      const input = runInputSchema.parse({
-        requestId: crypto.randomUUID(),
-        question,
-        kind,
-        selection: capturedSelection,
-        image,
-        externalQuery: capturedExternal,
       });
-      const request = { roomId: capturedRoom, documentId: capturedDocument, input };
-      setPending(request);
-      await deliver(request);
-    })().catch((reason: unknown) => {
-      if (generation.current === current) {
-        setError(
-          reason instanceof Error ? reason.message : 'Could not prepare this question.',
-        );
-        setBusy(false);
-      }
-    });
-  };
+    },
+    [
+      busy,
+      pending,
+      status?.configured,
+      roomId,
+      documentId,
+      selection,
+      externalEnabled,
+      externalQuery,
+      room.state.room.documentId,
+      pdfDocument,
+      deliver,
+    ],
+  );
+
+  const requestProof = useCallback(
+    (request: ProofRequest): void => {
+      setProofOpen(true);
+      requestAnswer('proof', request.question, request);
+    },
+    [requestAnswer],
+  );
+
+  useEffect(() => {
+    if (
+      !proofTarget ||
+      handledProofTarget.current === proofTarget.id ||
+      proofTarget.anchor.documentId !== documentId ||
+      !healthChecked ||
+      indexing ||
+      busy ||
+      pending
+    )
+      return;
+    handledProofTarget.current = proofTarget.id;
+    setProofOpen(true);
+    if (status?.configured)
+      requestProof({ question: PROOF_QUESTION, selection: proofTarget.anchor });
+  }, [
+    proofTarget,
+    documentId,
+    healthChecked,
+    indexing,
+    busy,
+    pending,
+    status,
+    requestProof,
+  ]);
 
   const sendDiscussion = (): void => {
     if (busy || !query.trim()) return;
@@ -878,10 +1091,22 @@ function SharedAssistantPanel({
           </div>
           {showThemeToggle && <ThemeToggle />}
         </div>
-        <h2>Think through it together.</h2>
-        <p>Questions, discussion and sources are shared with this room.</p>
+        <h2>{proofOpen ? 'Follow the proof.' : 'Think through it together.'}</h2>
+        <p>
+          {proofOpen
+            ? 'Walkthroughs and Lean results are shared with this room.'
+            : 'Questions, discussion and sources are shared with this room.'}
+        </p>
+        <div className="proof-panel-tabs" aria-label="Companion view">
+          <button aria-pressed={!proofOpen} onClick={() => setProofOpen(false)}>
+            Conversation
+          </button>
+          <button aria-pressed={proofOpen} onClick={() => setProofOpen(true)}>
+            Proofs
+          </button>
+        </div>
       </header>
-      <div className="panel-scroll">
+      <div className="panel-scroll" hidden={proofOpen}>
         <div className="mode-note">
           <Sparkles size={15} />
           {status?.configured
@@ -914,6 +1139,13 @@ function SharedAssistantPanel({
               </button>
               <button className="text-button" onClick={onSave}>
                 <Highlighter size={14} /> Save highlight
+              </button>
+              <button
+                className="text-button"
+                disabled={disabled || indexing}
+                onClick={() => requestProof({ question: PROOF_QUESTION, selection })}
+              >
+                Break down proof
               </button>
               {selection.quote && (
                 <>
@@ -1022,11 +1254,24 @@ function SharedAssistantPanel({
                 </span>
               </div>
               {message.answer ? (
-                <AnswerContent
-                  answer={message.answer}
-                  pageCount={room.state.room.pageCount}
-                  onNavigate={onNavigate}
-                />
+                <>
+                  <AnswerContent
+                    answer={message.answer}
+                    pageCount={room.state.room.pageCount}
+                    onNavigate={onNavigate}
+                  />
+                  {message.answer.proof && message.runId && (
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setProofRunId(message.runId);
+                        setProofOpen(true);
+                      }}
+                    >
+                      Open proof walkthrough
+                    </button>
+                  )}
+                </>
               ) : (
                 <p>{message.text}</p>
               )}
@@ -1042,12 +1287,47 @@ function SharedAssistantPanel({
                 onCancel={cancelRun}
                 pageCount={room.state.room.pageCount}
                 onNavigate={onNavigate}
+                onOpenProof={(id) => {
+                  setProofRunId(id);
+                  setProofOpen(true);
+                }}
               />
             ))}
         </section>
       </div>
+      {proofOpen && (
+        <ProofWorkspace
+          run={
+            runs.find((item) => item.id === proofRunId) ??
+            [...runs].reverse().find((item) => item.kind === 'proof') ??
+            null
+          }
+          runs={runs}
+          client={room.client}
+          basePath={'/rooms/' + roomId}
+          selection={selection}
+          lean={status?.lean}
+          configured={healthChecked ? Boolean(status?.configured) : null}
+          disabled={
+            disabled ||
+            indexing ||
+            runs.some((item) => item.kind === 'proof' && item.status === 'running')
+          }
+          busy={busy}
+          error={error}
+          pending={Boolean(pending)}
+          onRequest={requestProof}
+          onOpen={setProofRunId}
+          onNavigate={onNavigate}
+          onCancel={cancelRun}
+          onRetry={() => {
+            if (pending) void deliver(pending);
+          }}
+        />
+      )}
       <form
         className="composer shared-composer"
+        hidden={proofOpen}
         onSubmit={(event) => {
           event.preventDefault();
           if (mode === 'discuss') sendDiscussion();

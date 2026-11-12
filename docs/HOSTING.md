@@ -2,7 +2,8 @@
 
 Run one Node 24 process on a host with TLS termination, a persistent disk, and enough
 memory for the service plus two bounded PDF workers and password derivations. A
-2 GB instance is a starting allocation to measure, not a performance guarantee.
+2 GB instance is a starting allocation to measure with Lean disabled, not a
+performance guarantee. Lean workers require additional memory.
 Do not run multiple app replicas against this database or use ephemeral serverless
 filesystems. No hosting account or paid resource has been created.
 
@@ -56,6 +57,19 @@ The parser receives no server credentials and runs in a separate process with a
 absolute resident-memory limit. Use a dedicated least-privilege service account and
 host-level memory/CPU limits. Public untrusted multi-tenant ingestion needs a stronger
 isolated parser service; this release targets a small invited group.
+
+## Lean proof checking
+
+The current isolated checker requires macOS. Follow [Lean setup](PROOFS.md) to
+install its pinned toolchain and dependencies. Linux hosting can serve proof
+explanations, but checking remains unavailable until a supported isolated worker
+is added. There is no unrestricted execution fallback.
+
+Shared checks persist with their room, including the exact source hash, toolchain
+versions, diagnostics and measured goals. Only the requester or room owner may
+cancel an active check. Revoking that requester's access stops it. After a restart,
+interrupted checks remain unconfirmed; they are never presented as successful.
+Backups include shared proof artifacts and check results.
 
 ## Backups
 

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { AssistantPanel } from './assistant-panel';
 import type { DefinitionTarget } from './inline-definition';
+import type { ProofTarget } from './proof-workspace';
 import { ThemeToggle } from './theme-toggle';
 import { EnhancedReader } from './enhanced-reader';
 import { useRoom, useService } from './workspace-client';
@@ -98,6 +99,7 @@ export function ReaderApp({
     setDefinitionTarget({ id: crypto.randomUUID(), anchor });
   }, []);
   const closeDefinition = useCallback(() => setDefinitionTarget(null), []);
+  const [proofTarget, setProofTarget] = useState<ProofTarget | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -708,6 +710,16 @@ export function ReaderApp({
                   <button className="text-button" onClick={() => setShowPanel(true)}>
                     Ask about selection <ArrowRight size={15} />
                   </button>
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setDefinitionTarget(null);
+                      setProofTarget({ id: crypto.randomUUID(), anchor: selection });
+                      setShowPanel(true);
+                    }}
+                  >
+                    Break down proof
+                  </button>
                 </div>
               )}
               {selectionMode && !enhanced && (
@@ -980,6 +992,12 @@ export function ReaderApp({
           key={sessionId}
           room={room.connection}
           pdfDocument={pdf.document}
+          proofTarget={
+            paper?.id === proofTarget?.anchor.documentId &&
+            selection === proofTarget?.anchor
+              ? proofTarget
+              : null
+          }
           definitionTarget={
             !enhanced &&
             paper?.id === definitionTarget?.anchor.documentId &&

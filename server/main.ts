@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { createApp } from './app.ts';
 import { createBackup } from './backup.ts';
 import { createAstraProvider } from './provider.ts';
+import { createLeanChecker } from './lean-runner.ts';
 
 process.umask(0o077);
 const dbPath = resolve(process.env.DATABASE_PATH ?? './data/brain-vat.sqlite');
@@ -24,6 +25,7 @@ const app = await createApp({
     process.env.HOST ?? '127.0.0.1',
   ),
   dbPath,
+  leanChecker: createLeanChecker(),
   provider: createAstraProvider({
     model: process.env.ASTRA_MODEL ?? 'gpt-6-astra',
     baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',

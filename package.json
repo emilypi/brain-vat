@@ -14,6 +14,8 @@
   },
   "scripts": {
     "prepare:assets": "node scripts/prepare-assets.mjs",
+    "setup:lean": "node scripts/setup-lean.mjs",
+    "test:lean": "vitest run --config tests/lean/vitest.config.ts",
     "dev": "pnpm prepare:assets && vite --host 127.0.0.1",
     "dev:server": "tsx watch --env-file-if-exists=.env server/main.ts",
     "dev:all": "concurrently -k 'pnpm dev' 'pnpm dev:server'",

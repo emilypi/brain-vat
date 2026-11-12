@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { anchorSchema } from './document.ts';
 import type { Anchor, Highlight, PaperPassage } from './document.ts';
+import { proofParentSchema } from './proof.ts';
+import type {
+  LeanStatus,
+  ProofArtifact,
+  ProofBreakdown,
+  ProofContext,
+} from './proof.ts';
 
 export const credentialsSchema = z.object({
   username: z
@@ -16,10 +23,11 @@ export const credentialsSchema = z.object({
 export const runInputSchema = z.object({
   requestId: z.string().uuid(),
   question: z.string().trim().min(1).max(8000),
-  kind: z.enum(['question', 'definition', 'guide']),
+  kind: z.enum(['question', 'definition', 'guide', 'proof']),
   selection: anchorSchema.nullable(),
   image: z.string().max(3_000_000).nullable(),
   externalQuery: z.string().trim().max(500).nullable(),
+  proofParent: proofParentSchema.optional(),
 });
 
 export type RunInput = z.infer<typeof runInputSchema>;
@@ -40,6 +48,7 @@ export interface ServiceStatus {
   configured: boolean;
   registrationOpen: boolean;
   soloAvailable?: boolean;
+  lean?: LeanStatus;
 }
 
 export interface RoomSummary {
@@ -80,6 +89,8 @@ export interface GeneratedAnswer {
   evidence: SourceEvidence[];
   model: string;
   usage: { inputTokens: number; outputTokens: number };
+  proof?: ProofBreakdown;
+  proofArtifact?: ProofArtifact;
 }
 
 export interface ChatMessage {
@@ -132,6 +143,7 @@ export interface ProviderInput {
   externalQuery: string | null;
   pages: PaperPassage[];
   history: ChatMessage[];
+  proofContext?: ProofContext;
 }
 
 export interface AiProvider {
